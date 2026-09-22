@@ -1,0 +1,168 @@
+/* 暗い背景に光る図形。色はここにまとめる */
+:root {
+  --bg: #0b0f1a;
+  --hud: #cfd8ea;
+  --hud-dim: #6b7796;
+  --accent: #4dd8ff;
+  --gold: #ffd166;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--hud);
+  font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  /* 盤面をなぞる操作をブラウザのスクロールや拡大に取られないようにする */
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--safe-top) 12px calc(var(--safe-bottom) + 8px);
+}
+
+#hud {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  flex: none;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+#hud .spacer {
+  flex: 1;
+}
+
+#level-label {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+#move-label {
+  color: var(--hud-dim);
+}
+
+#hud button {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--hud);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#hud button:active {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+#hud button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+#board {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: block;
+}
+
+#level-text {
+  flex: none;
+  min-height: 1.6em;
+  padding: 6px 0 2px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--hud-dim);
+}
+
+/* 面選択 */
+#level-select {
+  position: fixed;
+  inset: 0;
+  /* 後ろの盤面の光が透けると数字が読みにくいので、ほぼ不透明にする */
+  background: #070a12;
+  padding: calc(var(--safe-top) + 16px) 16px calc(var(--safe-bottom) + 16px);
+  overflow-y: auto;
+  z-index: 10;
+}
+
+#level-select[hidden] {
+  display: none;
+}
+
+#level-select h2 {
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 16px;
+  letter-spacing: 0.08em;
+}
+
+#level-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 8px;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+#level-grid button {
+  aspect-ratio: 1;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--hud-dim);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+#level-grid button.cleared {
+  background: rgba(77, 216, 255, 0.14);
+  color: var(--accent);
+}
+
+#level-grid button.current {
+  background: var(--accent);
+  color: #06121a;
+  font-weight: 700;
+}
+
+#level-grid button:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+#level-select .close {
+  display: block;
+  margin: 20px auto 0;
+  padding: 10px 24px;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--hud);
+  font-size: 14px;
+  cursor: pointer;
+}

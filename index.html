@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0b0f1a" />
+    <meta name="description" content="指でなぞって箱を穴に運ぶ、短時間で遊べる箱押しパズル" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <title>BOXPUSH</title>
+  </head>
+  <body>
+    <div id="app">
+      <header id="hud">
+        <span id="level-label">面 01</span>
+        <span id="move-label">0 手</span>
+        <span class="spacer"></span>
+        <button id="sound-button" type="button" aria-label="音を止める">🔊</button>
+        <button id="undo-button" type="button" aria-label="一手戻る">↶</button>
+        <button id="reset-button" type="button" aria-label="最初からやり直す">↺</button>
+        <button id="menu-button" type="button" aria-label="面を選ぶ">☰</button>
+      </header>
+      <canvas id="board"></canvas>
+      <p id="level-text"></p>
+    </div>
+
+    <div id="level-select" hidden>
+      <h2>面をえらぶ</h2>
+      <div id="level-grid"></div>
+      <button class="close" type="button">とじる</button>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
