@@ -1,0 +1,24 @@
+{
+  "name": "boxpush",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ブラウザで遊ぶ箱押しパズル",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "gen": "node scripts/gen.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/shimobayashi/boxpush.git"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6",
+    "vitest": "^3.2.7"
+  }
+}
