@@ -44,6 +44,14 @@ export class Input {
     if (cell > 0) this.cellSize = cell
   }
 
+  /**
+   * いま触れている指を、なかったことにする。
+   * 面が切り替わったときに呼ぶ。指を置いたままだと、前の面の続きの動きが次の面に流れ込む。
+   */
+  release(): void {
+    this.pointerId = null
+  }
+
   destroy(): void {
     this.element.removeEventListener('pointerdown', this.onPointerDown)
     this.element.removeEventListener('pointermove', this.onPointerMove)
