@@ -174,6 +174,8 @@ function onFit(fresh: number[]): void {
 function onCleared(): void {
   locked = true
   clearTimer = CLEAR_SECONDS
+  // なぞり終えた指はここで切る。触れたままだと演出を飛ばす操作と見なされてしまう
+  input.release()
   updateHud()
 
   const level = game.level
@@ -223,10 +225,8 @@ function skipClearDelay(): void {
 
 const input = new Input(canvas, {
   onStep: (direction) => {
-    if (locked) {
-      skipClearDelay()
-      return
-    }
+    // クリア演出の間は動かさない。飛ばしたいときは指を離して触り直す
+    if (locked) return
     step(direction)
   },
   onTouch: () => sound.wake(),
