@@ -1,0 +1,8 @@
+<!-- ホーム画面で丸や角丸に切り抜かれても欠けないよう、中身を内側 60% に収める -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#0b0f1a"/>
+  <circle cx="318" cy="194" r="32" fill="none" stroke="#ffd166" stroke-width="14" opacity="0.6"/>
+  <rect x="164" y="288" width="88" height="88" rx="16" fill="#4dd8ff"/>
+  <rect x="264" y="288" width="88" height="88" rx="16" fill="#ffd166"/>
+  <circle cx="208" cy="206" r="38" fill="#f2f6ff"/>
+</svg>
