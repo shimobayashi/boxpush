@@ -68,7 +68,7 @@ function startLevel(index: number): void {
   clearTimer = 0
   fitCount = 0
   locked = false
-  effects.clear()
+  // 紙吹雪はここで消さない。次の面が始まってからも降り続ける方が続けて遊んでいる感じが出る
 
   progress = { ...progress, current: index }
   saveProgress(progress)
