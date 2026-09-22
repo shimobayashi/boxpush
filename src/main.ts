@@ -76,6 +76,7 @@ function startLevel(index: number): void {
   levelLabel.textContent = `面 ${String(index).padStart(2, '0')}`
   levelText.textContent = level.text
   input.release()
+  input.setCellSize(renderer.cellSize(level.width, level.height))
   updateHud()
 }
 
