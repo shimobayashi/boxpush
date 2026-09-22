@@ -276,6 +276,8 @@ function openLevelSelect(): void {
     if (level.index === game.level.index) button.classList.add('current')
     button.addEventListener('click', () => {
       levelSelect.hidden = true
+      // 選び直したときは前の面の演出を引きずらない
+      effects.clear()
       startLevel(level.index)
     })
     levelGrid.append(button)
