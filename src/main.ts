@@ -211,11 +211,20 @@ function showAllClear(): void {
   updateHud()
 }
 
+/**
+ * クリア演出の待ち時間を飛ばして、すぐ次の面へ送る。
+ * 残り時間を 0 にするだけだと、時間切れで次へ進む処理が二度と動かず固まる。
+ */
+function skipClearDelay(): void {
+  if (!locked || clearTimer <= 0) return
+  clearTimer = 0
+  advance()
+}
+
 const input = new Input(canvas, {
   onStep: (direction) => {
     if (locked) {
-      // クリア演出の途中で触ったら、その場で次の面へ送る
-      if (clearTimer > 0) clearTimer = 0
+      skipClearDelay()
       return
     }
     step(direction)
@@ -223,9 +232,7 @@ const input = new Input(canvas, {
   onTouch: () => sound.wake(),
 })
 
-canvas.addEventListener('pointerdown', () => {
-  if (locked && clearTimer > 0) clearTimer = 0
-})
+canvas.addEventListener('pointerdown', skipClearDelay)
 
 soundButton.addEventListener('click', () => {
   const on = sound.toggle()
