@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { Level } from '../src/core/level.ts'
-import { formatGrid, isGoal, parseLevels, toXY } from '../src/core/level.ts'
+import { fingerprint, formatGrid, isGoal, parseLevels, toXY } from '../src/core/level.ts'
 import { allowsSingleDirection, blockOf, TARGETS } from '../src/core/targets.ts'
 import { analyze } from '../src/solver/analyze.ts'
 import { solve } from '../src/solver/solve.ts'
@@ -16,33 +16,13 @@ import { solve } from '../src/solver/solve.ts'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const levels = parseLevels(readFileSync(join(ROOT, 'levels.txt'), 'utf8'))
 
-/** 回転と鏡写しの 8 通りのうち、文字列として一番小さいものを面の指紋にする */
-function fingerprint(level: Level): string {
-  const base = formatGrid(level, level.boxStarts, level.playerStart)
-  const shapes = [base]
-  let current = base
-  for (let i = 0; i < 3; i++) {
-    current = rotate(current)
-    shapes.push(current)
-  }
-  return [...shapes, ...shapes.map(mirror)].map((s) => s.join('\n')).sort()[0]!
-}
+// 解くのも測るのも面ごとに数千の盤面を調べるので、検査ごとに呼び直さず 1 回で済ませる
+const solutions = levels.map((level) => solve(level))
+const analyses = levels.map((level) => analyze(level))
 
-function rotate(rows: string[]): string[] {
-  const width = Math.max(...rows.map((r) => r.length))
-  const padded = rows.map((r) => r.padEnd(width, ' '))
-  const out: string[] = []
-  for (let x = 0; x < width; x++) {
-    let row = ''
-    for (let y = padded.length - 1; y >= 0; y--) row += padded[y]![x]
-    out.push(row)
-  }
-  return out
-}
-
-function mirror(rows: string[]): string[] {
-  const width = Math.max(...rows.map((r) => r.length))
-  return rows.map((row) => [...row.padEnd(width, ' ')].reverse().join(''))
+/** 面の指紋。生成スクリプトが同じ形を弾くのに使うものと同じ */
+function printOf(level: Level): string {
+  return fingerprint(formatGrid(level, level.boxStarts, level.playerStart))
 }
 
 describe('levels.txt', () => {
@@ -100,7 +80,7 @@ describe('levels.txt', () => {
   it('回転や鏡写しで重なる面が無い', () => {
     const seen = new Map<string, number>()
     for (const level of levels) {
-      const print = fingerprint(level)
+      const print = printOf(level)
       const already = seen.get(print)
       expect(already, `面 ${level.index} は面 ${already} と同じ形`).toBeUndefined()
       seen.set(print, level.index)
@@ -108,15 +88,15 @@ describe('levels.txt', () => {
   })
 
   it('すべての面が解ける', () => {
-    for (const level of levels) {
-      expect(solve(level), `面 ${level.index} が解けない`).not.toBe(null)
-    }
+    levels.forEach((level, i) => {
+      expect(solutions[i], `面 ${level.index} が解けない`).not.toBe(null)
+    })
   })
 
   it('難しさが目標の近くに収まっている', () => {
     levels.forEach((level, i) => {
       const target = TARGETS[i]!
-      const a = analyze(level)
+      const a = analyses[i]
       expect(a, `面 ${level.index} を測れない`).not.toBe(null)
       // 目標どおりの面が出ないときは縛りを緩めて作り直すので、その分だけ幅を見ておく
       expect(
@@ -130,7 +110,7 @@ describe('levels.txt', () => {
     levels.forEach((level, i) => {
       const target = TARGETS[i]!
       if (target.minDecomposition === 0) return
-      const a = analyze(level)!
+      const a = analyses[i]!
       // 片方の箱を全部片付けてから残り、で解ける面は考えることが少ない。
       // 目標どおりの面が出ないときは縛りを緩めて作り直すので、その分は見ておく
       expect(a.decomposition, `面 ${level.index} の分解`).toBeGreaterThanOrEqual(
@@ -140,19 +120,18 @@ describe('levels.txt', () => {
   })
 
   it('ブロック 2 以降は箱を 2 方向以上に押す', () => {
-    for (const level of levels) {
-      if (allowsSingleDirection(level.index)) continue
-      const solution = solve(level)!
+    levels.forEach((level, i) => {
+      if (allowsSingleDirection(level.index)) return
       expect(
-        solution.pushDirections.length,
+        solutions[i]!.pushDirections.length,
         `面 ${level.index}（ブロック ${blockOf(level.index)}）が一方向にしか押さない`,
       ).toBeGreaterThanOrEqual(2)
-    }
+    })
   })
 
   // 目標の表ではなく、出来上がった面そのものを測って確かめる。
   // 表どおりに作れているかは上の検査が見るので、ここは「遊ぶ人が感じる並び」を見る
-  const scores = levels.map((level) => analyze(level)!.score)
+  const scores = analyses.map((a) => a!.score)
 
   it('ブロックの中で難しくなり、切れ目で易しくなる', () => {
     for (let i = 1; i < scores.length; i++) {

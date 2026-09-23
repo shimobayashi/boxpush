@@ -54,10 +54,6 @@ export class Effects {
     return this.shake
   }
 
-  get flashAmount(): number {
-    return this.flash
-  }
-
   /**
    * 箱が穴にはまった。中心から光の粒が散り、輪が盤面の外へ広がる。
    * strength は 1 が普通、最後の 1 つを入れたときは大きくする。
@@ -344,10 +340,6 @@ export class Effects {
     ctx.fillStyle = this.flashTone === 'gold' ? '#ffd98a' : '#ffffff'
     ctx.fillRect(0, 0, width, height)
     ctx.restore()
-  }
-
-  get busy(): boolean {
-    return this.particles.length > 0 || this.ripples.length > 0
   }
 
   clear(): void {

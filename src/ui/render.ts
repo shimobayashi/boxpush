@@ -4,8 +4,8 @@
  */
 
 import type { Game } from '../core/game.ts'
-import type { Level } from '../core/level.ts'
-import { isGoal, isWall, toXY } from '../core/level.ts'
+import type { Board, Level } from '../core/level.ts'
+import { at, isGoal, isWall, toXY } from '../core/level.ts'
 import type { Reach } from '../core/reach.ts'
 import type { Effects } from './effects.ts'
 
@@ -88,12 +88,10 @@ export class Renderer {
 
     ctx.clearRect(0, 0, this.width, this.height)
 
-    const cell = this.cellSize(level.width, level.height)
+    const { cell, x: originX, y: originY } = this.boardOrigin(level.width, level.height)
     if (cell === 0) return
     const boardWidth = cell * level.width
     const boardHeight = cell * level.height
-    const originX = (this.width - boardWidth) / 2
-    const originY = (this.height - boardHeight) / 2
 
     this.drawBackground(state, cell)
 
@@ -157,6 +155,28 @@ export class Renderer {
   }
 
   /**
+   * 画面いっぱいに、中心から広がる放射グラデーションを重ねる。
+   * 内側と外側の半径は、画面の短辺と長辺に対する割合で渡す。
+   */
+  private glow(innerRatio: number, outerRatio: number, inner: string, outer: string): void {
+    const ctx = this.ctx
+    const cx = this.width / 2
+    const cy = this.height / 2
+    const gradient = ctx.createRadialGradient(
+      cx,
+      cy,
+      Math.min(this.width, this.height) * innerRatio,
+      cx,
+      cy,
+      Math.max(this.width, this.height) * outerRatio,
+    )
+    gradient.addColorStop(0, inner)
+    gradient.addColorStop(1, outer)
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, this.width, this.height)
+  }
+
+  /**
    * 盤面の外側。連続でクリアしているほど色が濃くなり、格子がゆっくり脈打つ。
    * 画面の半分以上が余白なので、ここが暗いままだと盤面だけが浮いて見える。
    */
@@ -167,34 +187,13 @@ export class Renderer {
     const heat = Math.min(1, state.streak / 5)
 
     if (heat > 0) {
-      const glow = ctx.createRadialGradient(
-        this.width / 2,
-        this.height / 2,
-        0,
-        this.width / 2,
-        this.height / 2,
-        Math.max(this.width, this.height) * 0.75,
-      )
-      glow.addColorStop(0, `rgba(40, 120, 190, ${0.1 * heat + 0.03 * heat * pulse})`)
-      glow.addColorStop(1, 'rgba(0, 0, 0, 0)')
-      ctx.fillStyle = glow
-      ctx.fillRect(0, 0, this.width, this.height)
+      // 中心から外へ薄れる青。続けてクリアしているほど濃い
+      this.glow(0, 0.75, `rgba(40, 120, 190, ${0.1 * heat + 0.03 * heat * pulse})`, 'rgba(0, 0, 0, 0)')
     }
 
     if (state.lastOne) {
-      // 残り 1 つのあいだは赤みを差して、張り詰めた感じにする
-      const glow = ctx.createRadialGradient(
-        this.width / 2,
-        this.height / 2,
-        Math.min(this.width, this.height) * 0.3,
-        this.width / 2,
-        this.height / 2,
-        Math.max(this.width, this.height) * 0.8,
-      )
-      glow.addColorStop(0, 'rgba(0, 0, 0, 0)')
-      glow.addColorStop(1, `rgba(190, 70, 60, ${0.12 + 0.08 * pulse})`)
-      ctx.fillStyle = glow
-      ctx.fillRect(0, 0, this.width, this.height)
+      // 残り 1 つのあいだは、外から迫る赤みで張り詰めた感じにする
+      this.glow(0.3, 0.8, 'rgba(0, 0, 0, 0)', `rgba(190, 70, 60, ${0.12 + 0.08 * pulse})`)
     }
 
     ctx.save()
@@ -226,7 +225,7 @@ export class Renderer {
 
     for (let y = 0; y < level.height; y++) {
       for (let x = 0; x < level.width; x++) {
-        const pos = y * level.width + x
+        const pos = at(level, x, y)
         const px = x * cell
         const py = y * cell
         if (isWall(level, pos)) {
@@ -353,7 +352,7 @@ export class Renderer {
     const ctx = this.ctx
     const level = state.game.level
     for (const box of state.game.boxes) {
-      const { x, y } = this.interpolate(box, state, level.width)
+      const { x, y } = this.interpolate(box, state, level)
       const onGoal = isGoal(level, box)
       const fresh = state.justFit.has(box)
 
@@ -424,37 +423,18 @@ export class Renderer {
   private drawPlayer(state: RenderState, cell: number): void {
     const ctx = this.ctx
     const level = state.game.level
-    const player = state.game.player
-    let x: number
-    let y: number
-    if (state.motion) {
-      const from = toXY(level, state.motion.playerFrom)
-      const to = toXY(level, player)
-      const t = state.motion.progress
-      x = from.x + (to.x - from.x) * t
-      y = from.y + (to.y - from.y) * t
-    } else {
-      const at = toXY(level, player)
-      x = at.x
-      y = at.y
-    }
-
-    const cx = x * cell + cell / 2
-    const cy = y * cell + cell / 2
+    const to = toXY(level, state.game.player)
+    const from = state.motion ? toXY(level, state.motion.playerFrom) : to
 
     // 動いている間は進む向きに伸ばす。止まっているときは丸いまま
-    let stretchX = 1
-    let stretchY = 1
-    let angle = 0
-    if (state.motion) {
-      const t = state.motion.progress
-      const amount = Math.sin(t * Math.PI) * 0.3
-      const from = toXY(level, state.motion.playerFrom)
-      const to = toXY(level, player)
-      angle = Math.atan2(to.y - from.y, to.x - from.x)
-      stretchX = 1 + amount
-      stretchY = 1 - amount * 0.5
-    }
+    const t = state.motion ? state.motion.progress : 1
+    const amount = state.motion ? Math.sin(t * Math.PI) * 0.3 : 0
+    const angle = state.motion ? Math.atan2(to.y - from.y, to.x - from.x) : 0
+    const stretchX = 1 + amount
+    const stretchY = 1 - amount * 0.5
+
+    const cx = (from.x + (to.x - from.x) * t) * cell + cell / 2
+    const cy = (from.y + (to.y - from.y) * t) * cell + cell / 2
 
     ctx.save()
     ctx.shadowColor = 'rgba(255, 255, 255, 0.7)'
@@ -490,13 +470,13 @@ export class Renderer {
   }
 
   /** 箱の、補間した位置（マス単位） */
-  private interpolate(box: number, state: RenderState, width: number): { x: number; y: number } {
-    const to = { x: box % width, y: Math.floor(box / width) }
+  private interpolate(box: number, state: RenderState, level: Board): { x: number; y: number } {
+    const to = toXY(level, box)
     const motion = state.motion
     if (!motion) return to
     const fromPos = motion.from.get(box)
     if (fromPos === undefined) return to
-    const from = { x: fromPos % width, y: Math.floor(fromPos / width) }
+    const from = toXY(level, fromPos)
     const t = motion.progress
     return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }
   }

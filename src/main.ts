@@ -6,7 +6,7 @@
 
 import levelsText from '../levels.txt?raw'
 import type { Direction } from './core/game.ts'
-import { Game } from './core/game.ts'
+import { delta, Game } from './core/game.ts'
 import { isGoal, parseLevels, toXY } from './core/level.ts'
 import type { Reach } from './core/reach.ts'
 import { findReaches } from './core/reach.ts'
@@ -67,10 +67,8 @@ let game = new Game(levels[0]!)
 let motion: Motion | null = null
 let justFit = new Set<number>()
 let justFitTimer = 0
+/** クリア演出の残り秒数。0 より大きい間がクリア演出中 */
 let clearTimer = 0
-let fitCount = 0
-/** クリア演出の間は操作を受け付けない */
-let locked = false
 /** 人が通ってきた跡 */
 let trail: { pos: number; age: number }[] = []
 /** 残りの箱があと 1 つになったことを、もう知らせたか */
@@ -102,8 +100,6 @@ function startLevel(index: number): void {
   justFit = new Set()
   justFitTimer = 0
   clearTimer = 0
-  fitCount = 0
-  locked = false
   trail = []
   lastOneNotified = false
   countedMoves = 0
@@ -130,13 +126,19 @@ function updateHud(): void {
   updateRemaining()
 }
 
+/** クリア演出を見せている最中か */
+function isClearing(): boolean {
+  return clearTimer > 0
+}
+
 /**
- * 今は操作を受け付けない。
- * クリア演出の間に加えて、最後の箱を溜めてから爆発させるまでの間も入る。
+ * 今は盤面を進めない。
+ *
+ * クリア演出の間、最後の箱を溜めてから爆発させるまでの間、面選択を開いている間。
  * ここを開けておくと、キーを押しっぱなしにしたときに入ったばかりの箱を穴の先へ押し出せてしまう。
  */
 function isBusy(): boolean {
-  return locked || pendingFit !== null || hitStop > 0
+  return isClearing() || pendingFit !== null || hitStop > 0 || !levelSelect.hidden
 }
 
 function step(direction: Direction): void {
@@ -173,26 +175,15 @@ function step(direction: Direction): void {
   trail.unshift({ pos: playerBefore, age: 0 })
   if (trail.length > TRAIL_LIMIT) trail.length = TRAIL_LIMIT
 
-  const board = renderer.boardOrigin(game.level.width, game.level.height)
-  const footAt = toXY(game.level, playerBefore)
-  effects.footprint(
-    board.x + footAt.x * board.cell + board.cell / 2,
-    board.y + footAt.y * board.cell + board.cell / 2,
-    board.cell,
-  )
+  const foot = centerOf(playerBefore)
+  effects.footprint(foot.x, foot.y, foot.cell)
 
   if (pushedBox !== null) {
     // 押した箱の後ろから粒が散る。押している手応えを目でも返す
-    const at = toXY(game.level, pushedBox)
+    const box = centerOf(pushedBox)
     const step = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[direction]
-    effects.scrape(
-      board.x + at.x * board.cell + board.cell / 2,
-      board.y + at.y * board.cell + board.cell / 2,
-      board.cell,
-      step[0]!,
-      step[1]!,
-    )
-    effects.bump(board.cell * 0.04)
+    effects.scrape(box.x, box.y, box.cell, step[0]!, step[1]!)
+    effects.bump(box.cell * 0.04)
     sound.push()
     vibrate(sound, 8)
   } else {
@@ -214,7 +205,6 @@ function step(direction: Direction): void {
     }
   } else if (fitAfter.size < fitBefore.size) {
     justFit = new Set()
-    fitCount = Math.max(0, fitCount - 1)
     sound.unfit()
   }
 
@@ -232,7 +222,7 @@ function updateReaches(notify = true): void {
   // 数だけ見ると、別の箱の予告に入れ替わったときに気づけない
   const before = new Set(reaches.map((r) => `${r.box}>${r.goal}`))
   // 予告は面の最後の 1 つだけ。途中の箱でも出すと、ここぞという感じが薄れる
-  const quiet = locked || pendingFit !== null || !isLastOne()
+  const quiet = isBusy() || !isLastOne()
   reaches = quiet ? [] : findReaches(game)
   const appeared = reaches.some((r) => !before.has(`${r.box}>${r.goal}`))
   if (notify && appeared) sound.reach()
@@ -245,8 +235,7 @@ function updateReaches(notify = true): void {
 function notifyLastOne(): void {
   if (game.cleared) return
   if (game.level.boxStarts.length < 2) return
-  const remaining = game.level.boxStarts.length - fitBoxes().size
-  if (remaining === 1) {
+  if (remaining() === 1) {
     if (!lastOneNotified) {
       lastOneNotified = true
       sound.lastOne()
@@ -256,23 +245,32 @@ function notifyLastOne(): void {
   }
 }
 
+/** まだ穴に入っていない箱の数 */
+function remaining(): number {
+  return game.level.boxStarts.length - fitBoxes().size
+}
+
 /** 残りの箱があと 1 つか */
 function isLastOne(): boolean {
-  if (locked) return false
-  return game.level.boxStarts.length - fitBoxes().size === 1
+  if (isClearing()) return false
+  return remaining() === 1
+}
+
+/** マスの中心の画面座標と、そのときのマスの大きさ */
+function centerOf(pos: number): { x: number; y: number; cell: number } {
+  const level = game.level
+  const board = renderer.boardOrigin(level.width, level.height)
+  const at = toXY(level, pos)
+  return {
+    x: board.x + at.x * board.cell + board.cell / 2,
+    y: board.y + at.y * board.cell + board.cell / 2,
+    cell: board.cell,
+  }
 }
 
 /** 押されて動いた箱の、動く前の位置 */
 function findMovedFrom(box: number, before: Map<number, number>, direction: Direction): number {
-  const level = game.level
-  const back =
-    direction === 'up'
-      ? box + level.width
-      : direction === 'down'
-        ? box - level.width
-        : direction === 'left'
-          ? box + 1
-          : box - 1
+  const back = box - delta(game.level, direction)
   return before.has(back) ? back : box
 }
 
@@ -286,23 +284,20 @@ function fitBoxes(): Set<number> {
 }
 
 function onFit(fresh: number[]): void {
-  const level = game.level
   justFit = new Set(fresh)
   justFitTimer = JUST_FIT_SECONDS
 
   // 入れるたびに派手さを積み増す。1 つ目より 2 つ目、2 つ目より 3 つ目が強い。
   // 最後の 1 つが決まった瞬間だけ、けた違いにする
   const final = game.cleared
-  const strength = final ? 6 : 2.6 + fitCount * 0.8
+  const already = fitBoxes().size - fresh.length
+  const strength = final ? 6 : 2.6 + already * 0.8
 
-  const { cell, x, y } = renderer.boardOrigin(level.width, level.height)
   for (const box of fresh) {
-    const at = toXY(level, box)
-    const cx = x + at.x * cell + cell / 2
-    const cy = y + at.y * cell + cell / 2
-    effects.burst(cx, cy, cell, strength)
+    const { x, y, cell } = centerOf(box)
+    effects.burst(x, y, cell, strength)
     // 溜めたぶんを解き放つ衝撃波。画面の外まで走り抜ける
-    effects.shockwave(cx, cy, cell, strength)
+    effects.shockwave(x, y, cell, strength)
   }
 
   if (final) {
@@ -311,22 +306,20 @@ function onFit(fresh: number[]): void {
     vibrate(sound, [0, 60])
   } else {
     // 金色に飛ばす。入れた数が増えるほど強くする
-    effects.whiteOut(Math.min(0.75, 0.42 + fitCount * 0.12), 'gold')
-    sound.fit(fitCount)
-    vibrate(sound, [0, 35 + fitCount * 10])
+    effects.whiteOut(Math.min(0.75, 0.42 + already * 0.12), 'gold')
+    sound.fit(already)
+    vibrate(sound, [0, 35 + already * 10])
   }
-  fitCount += fresh.length
 }
 
 /** あと何個で終わりかを出す。残りが見えると入れたくなる */
 function updateRemaining(): void {
-  const remaining = game.level.boxStarts.length - fitBoxes().size
-  remainingLabel.textContent = remaining > 0 ? `あと ${remaining}` : ''
-  remainingLabel.classList.toggle('last-one', remaining === 1)
+  const left = remaining()
+  remainingLabel.textContent = left > 0 ? `あと ${left}` : ''
+  remainingLabel.classList.toggle('last-one', left === 1)
 }
 
 function onCleared(): void {
-  locked = true
   clearTimer = CLEAR_SECONDS
   // なぞり終えた指はここで切る。触れたままだと演出を飛ばす操作と見なされてしまう
   input.release()
@@ -366,9 +359,8 @@ function advance(): void {
 function showAllClear(): void {
   // 面数は levels.txt 次第で変わるので、数えた値を出す
   levelText.textContent = `全 ${levels.length} 面クリア。おつかれさまでした`
-  openLevelSelect()
   // 面選択に戻ったあとも最後の面を眺められるよう、盤面はそのままにしておく
-  locked = false
+  openLevelSelect()
   updateHud()
 }
 
@@ -377,7 +369,7 @@ function showAllClear(): void {
  * 残り時間を 0 にするだけだと、時間切れで次へ進む処理が二度と動かず固まる。
  */
 function skipClearDelay(): void {
-  if (!locked || clearTimer <= 0) return
+  if (!isClearing()) return
   clearTimer = 0
   advance()
 }
@@ -394,12 +386,7 @@ const input = new Input(canvas, {
  * 1 歩ごとに結果を見るので、入ったところで残りを捨てて止められる。
  */
 function pump(): void {
-  if (isBusy()) {
-    // 演出の間に溜まったぶんは捨てる。終わったとたんに歩き出さないため
-    input.release()
-    return
-  }
-  if (motion) return
+  if (isBusy() || motion) return
   const direction = input.take()
   if (direction) step(direction)
 }
@@ -417,24 +404,18 @@ undoButton.addEventListener('click', () => {
   if (!game.undo()) return
   motion = null
   justFit = new Set()
-  fitCount = fitBoxes().size
   updateReaches(false)
   updateHud()
 })
 
 resetButton.addEventListener('click', () => {
   if (isBusy()) return
-  game.reset()
-  motion = null
-  justFit = new Set()
-  fitCount = 0
-  trail = []
-  lastOneNotified = false
   // やり直したら連続クリアは途切れる。背景の熱も冷める
   streak = 0
   effects.clear()
-  updateReaches(false)
-  updateHud()
+  // 面ごとの状態を戻すのは startLevel の仕事。ここで並べ直すと、
+  // 状態が増えたときに片方だけ足し忘れる
+  startLevel(game.level.index)
 })
 
 menuButton.addEventListener('click', openLevelSelect)
@@ -469,6 +450,19 @@ function frame(now: number): void {
   const dt = Math.min(0.05, (now - lastTime) / 1000)
   lastTime = now
 
+  // 入力を受けるかを決めるのはここ 1 か所。止めたい場面が増えても足す場所は増えない
+  input.setAccepting(!isBusy())
+
+  // 面選択を開いている間は盤面を進めない。
+  // 画面は覆われていてもキーは届くので、裏で人が歩いたり、
+  // クリア待ちが進んで面が変わったりして、選択画面の「今ここ」とずれる。
+  // 絵だけは描き続けて、粒や紙吹雪が止まって見えないようにする
+  if (!levelSelect.hidden) {
+    draw(dt)
+    requestAnimationFrame(frame)
+    return
+  }
+
   // 吸い込まれ切ったあとの静止。ここでは何も進めない
   if (hitStop > 0) {
     hitStop -= dt
@@ -493,14 +487,11 @@ function frame(now: number): void {
 
     // 吸い込まれている間、入る先の穴へ粒を集める。溜まっていくのが目に見える
     if (motion.slow && pendingFit) {
-      const board = renderer.boardOrigin(game.level.width, game.level.height)
+      // 進むほど密に集める
+      const count = 1 + Math.floor(motion.progress * 3)
       for (const box of pendingFit) {
-        const at = toXY(game.level, box)
-        const cx = board.x + at.x * board.cell + board.cell / 2
-        const cy = board.y + at.y * board.cell + board.cell / 2
-        // 進むほど密に集める
-        const count = 1 + Math.floor(motion.progress * 3)
-        for (let i = 0; i < count; i++) effects.gather(cx, cy, board.cell)
+        const { x, y, cell } = centerOf(box)
+        for (let i = 0; i < count; i++) effects.gather(x, y, cell)
       }
     }
 
@@ -530,19 +521,14 @@ function frame(now: number): void {
     reachSpawn += dt
     if (reachSpawn > 0.07) {
       reachSpawn = 0
-      const board = renderer.boardOrigin(game.level.width, game.level.height)
       for (const reach of reaches) {
-        const at = toXY(game.level, reach.goal)
-        effects.gather(
-          board.x + at.x * board.cell + board.cell / 2,
-          board.y + at.y * board.cell + board.cell / 2,
-          board.cell,
-        )
+        const { x, y, cell } = centerOf(reach.goal)
+        effects.gather(x, y, cell)
       }
     }
   }
 
-  if (clearTimer > 0) {
+  if (isClearing()) {
     const before = clearTimer
     clearTimer -= dt
 
@@ -577,7 +563,7 @@ function draw(dt: number): void {
       game,
       motion,
       justFit,
-      clearProgress: locked ? Math.max(0, CLEAR_SECONDS - clearTimer) : 0,
+      clearProgress: isClearing() ? CLEAR_SECONDS - clearTimer : 0,
       lastOne: isLastOne(),
       trail,
       streak,

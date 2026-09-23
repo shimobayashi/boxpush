@@ -1,14 +1,18 @@
 /**
  * 面を解いて、最小押し回数と、そのときの最小手数を返す。
  *
- * 難易度は最小押し回数で測ると決めたので（docs/design.md）、
  * 押し回数を第 1 のコスト、手数を第 2 のコストにした経路探索にする。
  * 2 つをまとめて `押し回数 * PUSH_WEIGHT + 手数` という 1 つの数にし、ダイクストラで最小を取る。
+ *
+ * 難しさはここでは測らない（src/solver/analyze.ts が測る）。
+ * こちらは手数と押した向きが要るときに使う。人がどう歩いたかまで見るので、
+ * 人の位置を範囲にまとめる analyze より調べる盤面が多い。
  */
 
 import type { Direction } from '../core/game.ts'
+import { steps } from '../core/game.ts'
 import type { Level } from '../core/level.ts'
-import { isGoal, isWall } from '../core/level.ts'
+import { at, inLine, isGoal, isWall } from '../core/level.ts'
 
 /**
  * 手数がこの値を超える面は扱わない。
@@ -28,13 +32,13 @@ export type Solution = {
 }
 
 export type SolveOptions = {
-  /** 押し回数がこれを超えたら探索を打ち切る。生成時に見込みの無い候補を早く捨てるのに使う */
+  /** 押し回数がこれを超えたら探索を打ち切る */
   readonly maxPushes?: number
 }
 
 export function solve(level: Level, options: SolveOptions = {}): Solution | null {
   const maxPushes = options.maxPushes ?? Infinity
-  const size = level.width * level.height
+  const around = steps(level)
 
   // 押せない位置（穴でない角）をあらかじめ調べておく。
   // ここに箱が入ると二度と動かせないので、探索を早く打ち切れる。
@@ -65,9 +69,9 @@ export function solve(level: Level, options: SolveOptions = {}): Solution | null
     if (moves >= MAX_MOVES - 1) continue
 
     const boxSet = new Set(boxes)
-    for (const step of steps(level)) {
+    for (const step of around) {
       const next = player + step
-      if (!inside(level, player, next, step, size)) continue
+      if (!inLine(level, player, next, step)) continue
       if (isWall(level, next)) continue
 
       let nextCost: number
@@ -75,7 +79,7 @@ export function solve(level: Level, options: SolveOptions = {}): Solution | null
 
       if (boxSet.has(next)) {
         const beyond = next + step
-        if (!inside(level, next, beyond, step, size)) continue
+        if (!inLine(level, next, beyond, step)) continue
         if (isWall(level, beyond) || boxSet.has(beyond)) continue
         if (deadCells[beyond] && !isGoal(level, beyond)) continue
 
@@ -96,11 +100,6 @@ export function solve(level: Level, options: SolveOptions = {}): Solution | null
   }
 
   return null
-}
-
-/** 解けるかどうかだけ知りたいとき */
-export function isSolvable(level: Level): boolean {
-  return solve(level) !== null
 }
 
 /** ゴールから逆にたどって、箱を押した向きを集める */
@@ -137,7 +136,7 @@ export function findDeadCells(level: Level): boolean[] {
   const dead: boolean[] = new Array(level.width * level.height).fill(false)
   for (let y = 0; y < level.height; y++) {
     for (let x = 0; x < level.width; x++) {
-      const pos = y * level.width + x
+      const pos = at(level, x, y)
       if (isWall(level, pos)) continue
       const up = y === 0 || isWall(level, pos - level.width)
       const down = y === level.height - 1 || isWall(level, pos + level.width)
@@ -147,19 +146,6 @@ export function findDeadCells(level: Level): boolean[] {
     }
   }
   return dead
-}
-
-function steps(level: Level): number[] {
-  return [-level.width, level.width, -1, 1]
-}
-
-/** 盤面の端をはみ出していないか。左右の動きは行をまたがないことも見る */
-function inside(level: Level, from: number, to: number, step: number, size: number): boolean {
-  if (to < 0 || to >= size) return false
-  if (step === -1 || step === 1) {
-    return Math.floor(from / level.width) === Math.floor(to / level.width)
-  }
-  return true
 }
 
 function stateKey(boxes: readonly number[], player: number): string {

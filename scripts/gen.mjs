@@ -11,10 +11,9 @@
 import { writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseLevels } from '../src/core/level.ts'
+import { fingerprint, formatGrid, inLine, parseLevels } from '../src/core/level.ts'
 import { TARGETS } from '../src/core/targets.ts'
 import { analyze } from '../src/solver/analyze.ts'
-import { solve } from '../src/solver/solve.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -48,10 +47,6 @@ const TITLES = [
   '仕切り直し', 'みっつの箱', '回り込む', '入れ替え', '奥から', '折り返し',
   'ひと息', '四つ目', '詰め込む', '両側から', '出口はひとつ', 'おしまい',
 ]
-
-const WALL = '#'
-const FLOOR = ' '
-const GOAL = '.'
 
 /** seed 固定の乱数。誰が走らせても同じ面になる */
 function makeRandom(seed) {
@@ -123,12 +118,6 @@ function stepsOf(size) {
   return [-size, size, -1, 1]
 }
 
-/** 左右の動きが行をまたいでいないか */
-function sameRow(from, to, step, size) {
-  if (step !== -1 && step !== 1) return true
-  return Math.floor(from / size) === Math.floor(to / size)
-}
-
 /**
  * ゴールの状態から逆向きに動かして初期配置を作る。
  *
@@ -136,6 +125,7 @@ function sameRow(from, to, step, size) {
  * これを前向きに見ると、ちょうど押したことになる。
  */
 function pullBack(random, walls, size, goals, steps) {
+  const board = { width: size, height: size }
   const boxes = new Set(goals)
   const floors = []
   for (let i = 0; i < walls.length; i++) if (!walls[i] && !boxes.has(i)) floors.push(i)
@@ -148,16 +138,11 @@ function pullBack(random, walls, size, goals, steps) {
     const moves = []
     for (const step of stepsOf(size)) {
       const ahead = player + step
-      if (ahead < 0 || ahead >= walls.length) continue
-      if (!sameRow(player, ahead, step, size)) continue
+      if (!inLine(board, player, ahead, step)) continue
       if (walls[ahead] || boxes.has(ahead)) continue
 
       const behind = player - step
-      const canPull =
-        behind >= 0 &&
-        behind < walls.length &&
-        sameRow(player, behind, -step, size) &&
-        boxes.has(behind)
+      const canPull = inLine(board, player, behind, -step) && boxes.has(behind)
 
       moves.push({ step, pull: false })
       // 直前に引いた箱をそのまま戻すと盤面が元通りになるので、その引きは選ばない
@@ -180,54 +165,6 @@ function pullBack(random, walls, size, goals, steps) {
   }
 
   return { boxes: [...boxes].sort((a, b) => a - b), player, pulls }
-}
-
-/** 盤面を記号の行にする */
-function toGrid(walls, size, goals, boxes, player) {
-  const goalSet = new Set(goals)
-  const boxSet = new Set(boxes)
-  const rows = []
-  for (let y = 0; y < size; y++) {
-    let row = ''
-    for (let x = 0; x < size; x++) {
-      const pos = y * size + x
-      if (walls[pos]) row += WALL
-      else if (boxSet.has(pos)) row += goalSet.has(pos) ? '*' : '$'
-      else if (pos === player) row += goalSet.has(pos) ? '+' : '@'
-      else if (goalSet.has(pos)) row += GOAL
-      else row += FLOOR
-    }
-    rows.push(row)
-  }
-  return rows
-}
-
-/** 回転と鏡写しの 8 通りのうち、文字列として一番小さいものを面の指紋にする */
-function fingerprint(rows) {
-  let shapes = [rows]
-  let current = rows
-  for (let i = 0; i < 3; i++) {
-    current = rotate(current)
-    shapes.push(current)
-  }
-  shapes = [...shapes, ...shapes.map(mirror)]
-  return shapes.map((shape) => shape.join('\n')).sort()[0]
-}
-
-function rotate(rows) {
-  const h = rows.length
-  const w = rows[0].length
-  const out = []
-  for (let x = 0; x < w; x++) {
-    let row = ''
-    for (let y = h - 1; y >= 0; y--) row += rows[y][x]
-    out.push(row)
-  }
-  return out
-}
-
-function mirror(rows) {
-  return rows.map((row) => [...row].reverse().join(''))
 }
 
 /**
@@ -273,6 +210,9 @@ function generateOne(random, target, seen) {
       goals.push(pool[at])
       pool.splice(at, 1)
     }
+    const goalFlags = new Array(walls.length).fill(false)
+    for (const goal of goals) goalFlags[goal] = true
+    const shape = { width: target.size, height: target.size, walls, goals: goalFlags }
 
     // 長めに引いて、箱を遠くまで運ぶ余地を作る
     const pulled = pullBack(random, walls, target.size, goals, 200)
@@ -283,11 +223,11 @@ function generateOne(random, target, seen) {
     if (pulled.pulls < minPulls(target)) continue
 
     // 最初から穴に乗っている箱があれば捨てる
-    if (pulled.boxes.some((box) => goals.includes(box))) continue
+    if (pulled.boxes.some((box) => goalFlags[box])) continue
 
     // 余白は削らない。外周の壁を確実に残すのと、
     // 「人も箱も通らないマスが広い面は外さない」という決め（docs/design.md）に合わせる
-    const rows = toGrid(walls, target.size, goals, pulled.boxes, pulled.player)
+    const rows = formatGrid(shape, pulled.boxes, pulled.player)
     const print = fingerprint(rows)
     if (seen.has(print)) continue
 
@@ -299,14 +239,11 @@ function generateOne(random, target, seen) {
     }
     if (!level) continue
 
-    // 難しさを測るのは重いので、先に軽い解答器で明らかに外れたものを捨てる
-    const quick = solve(level)
-    if (!quick) continue
-    if (quick.pushes < minPulls(target)) continue
-
     // 調べる盤面が多すぎる候補は、測るのに時間がかかる割に難しさは変わらないので捨てる
     const a = analyze(level, { maxStates: MAX_STATES })
     if (!a) continue
+    // 押し回数が目標に遠く及ばない候補は、他がどれだけ良くても点数が届かない
+    if (a.pushes < minPulls(target)) continue
     if (Math.abs(a.score - target.score) > target.tolerance) continue
     if (a.decomposition < target.minDecomposition) continue
     if (a.boxChanges < target.minBoxChanges) continue

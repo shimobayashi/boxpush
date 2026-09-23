@@ -33,12 +33,18 @@ export type Level = {
   readonly boxStarts: readonly number[]
 }
 
-export function at(level: Level, x: number, y: number): number {
-  return y * level.width + x
+/**
+ * 大きさだけ分かればよい処理のための、面の最小限の形。
+ * 面ができる前の生成スクリプトからも同じ処理を呼びたいため。
+ */
+export type Board = Pick<Level, 'width' | 'height'>
+
+export function at(board: Board, x: number, y: number): number {
+  return y * board.width + x
 }
 
-export function toXY(level: Level, pos: number): { x: number; y: number } {
-  return { x: pos % level.width, y: Math.floor(pos / level.width) }
+export function toXY(board: Board, pos: number): { x: number; y: number } {
+  return { x: pos % board.width, y: Math.floor(pos / board.width) }
 }
 
 export function isWall(level: Level, pos: number): boolean {
@@ -47,6 +53,20 @@ export function isWall(level: Level, pos: number): boolean {
 
 export function isGoal(level: Level, pos: number): boolean {
   return level.goals[pos] === true
+}
+
+/**
+ * from から step だけ動いた先の to が、盤面の中か。
+ *
+ * 盤面を 1 次元の配列で持っているので、左右に動くと行を飛び越えて
+ * 隣の行の端につながってしまう。それも弾く。
+ */
+export function inLine(board: Board, from: number, to: number, step: number): boolean {
+  if (to < 0 || to >= board.width * board.height) return false
+  if (step === -1 || step === 1) {
+    return Math.floor(from / board.width) === Math.floor(to / board.width)
+  }
+  return true
 }
 
 export class LevelParseError extends Error {}
@@ -180,13 +200,17 @@ function buildLevel(index: number, title: string, text: string, grid: string[]):
 /**
  * 面を記号の行に戻す。生成スクリプトと、面の同一判定に使う。
  */
-export function formatGrid(level: Level, boxes: readonly number[], player: number): string[] {
+export function formatGrid(
+  level: Board & Pick<Level, 'walls' | 'goals'>,
+  boxes: readonly number[],
+  player: number,
+): string[] {
   const rows: string[] = []
   const boxSet = new Set(boxes)
   for (let y = 0; y < level.height; y++) {
     let row = ''
     for (let x = 0; x < level.width; x++) {
-      const pos = y * level.width + x
+      const pos = at(level, x, y)
       if (level.walls[pos]) row += WALL
       else if (boxSet.has(pos)) row += level.goals[pos] ? BOX_ON_GOAL : BOX
       else if (pos === player) row += level.goals[pos] ? PLAYER_ON_GOAL : PLAYER
@@ -196,4 +220,38 @@ export function formatGrid(level: Level, boxes: readonly number[], player: numbe
     rows.push(row.replace(/\s+$/, ''))
   }
   return rows
+}
+
+/**
+ * 面の指紋。回転と鏡写しの 8 通りのうち、文字列として一番小さいものを採る。
+ *
+ * 生成スクリプトは「同じ形の面を作らない」ために、テストは「同じ形の面が無い」ことを
+ * 確かめるために使う。別々に持つと、弾いていないものを通すか、通したものを落とすかになる。
+ */
+export function fingerprint(rows: readonly string[]): string {
+  const shapes = [rows]
+  let current = rows
+  for (let i = 0; i < 3; i++) {
+    current = rotate(current)
+    shapes.push(current)
+  }
+  return [...shapes, ...shapes.map(mirror)].map((shape) => shape.join('\n')).sort()[0]!
+}
+
+/** 行の長さがまちまちでも回せるよう、短い行は空白で埋めてから回す */
+function rotate(rows: readonly string[]): string[] {
+  const width = Math.max(...rows.map((row) => row.length))
+  const padded = rows.map((row) => row.padEnd(width, ' '))
+  const out: string[] = []
+  for (let x = 0; x < width; x++) {
+    let row = ''
+    for (let y = padded.length - 1; y >= 0; y--) row += padded[y]![x]
+    out.push(row)
+  }
+  return out
+}
+
+function mirror(rows: readonly string[]): string[] {
+  const width = Math.max(...rows.map((row) => row.length))
+  return rows.map((row) => [...row.padEnd(width, ' ')].reverse().join(''))
 }

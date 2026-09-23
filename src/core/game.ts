@@ -4,7 +4,7 @@
  */
 
 import type { Level } from './level.ts'
-import { isGoal, isWall } from './level.ts'
+import { inLine, isGoal, isWall } from './level.ts'
 
 export type Direction = 'up' | 'down' | 'left' | 'right'
 
@@ -65,11 +65,11 @@ export class Game {
   move(direction: Direction): boolean {
     const step = delta(this.level, direction)
     const next = this.playerPos + step
-    if (!this.inside(next, direction) || isWall(this.level, next)) return false
+    if (!inLine(this.level, this.playerPos, next, step) || isWall(this.level, next)) return false
 
     if (this.boxPositions.has(next)) {
       const beyond = next + step
-      if (!this.inside(beyond, direction) || isWall(this.level, beyond) || this.boxPositions.has(beyond)) {
+      if (!inLine(this.level, next, beyond, step) || isWall(this.level, beyond) || this.boxPositions.has(beyond)) {
         return false
       }
       this.boxPositions.delete(next)
@@ -105,19 +105,11 @@ export class Game {
     this.boxPositions = new Set(this.level.boxStarts)
     this.history = []
   }
+}
 
-  /**
-   * 盤面の端をはみ出していないか。
-   * 盤面を 1 次元で持っているので、左右の動きは行をまたがないことも見る。
-   */
-  private inside(pos: number, direction: Direction): boolean {
-    if (pos < 0 || pos >= this.level.width * this.level.height) return false
-    if (direction === 'left' || direction === 'right') {
-      const from = direction === 'left' ? pos + 1 : pos - 1
-      return Math.floor(pos / this.level.width) === Math.floor(from / this.level.width)
-    }
-    return true
-  }
+/** 上下左右へ 1 マス動く量。並びは DIRECTIONS と同じ */
+export function steps(level: Level): readonly number[] {
+  return DIRECTIONS.map((direction) => delta(level, direction))
 }
 
 export function delta(level: Level, direction: Direction): number {
