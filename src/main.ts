@@ -469,6 +469,17 @@ function frame(now: number): void {
   const dt = Math.min(0.05, (now - lastTime) / 1000)
   lastTime = now
 
+  // 面選択を開いている間は盤面を進めない。
+  // 画面は覆われていてもキーは届くので、裏で人が歩いたり、
+  // クリア待ちが進んで面が変わったりして、選択画面の「今ここ」とずれる。
+  // 絵だけは描き続けて、粒や紙吹雪が止まって見えないようにする
+  if (!levelSelect.hidden) {
+    input.release()
+    draw(dt)
+    requestAnimationFrame(frame)
+    return
+  }
+
   // 吸い込まれ切ったあとの静止。ここでは何も進めない
   if (hitStop > 0) {
     hitStop -= dt
