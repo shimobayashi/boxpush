@@ -1,8 +1,8 @@
 /**
  * 面を生成して levels.txt を書き出す。
  *
- * 目標の難易度（最小押し回数）は docs/design.md の表のとおり。
- * ゴールの状態から箱を逆向きに引いて候補を作り、解答器で押し回数を測って、
+ * 目標の難しさは docs/design.md の表のとおり。
+ * ゴールの状態から箱を逆向きに引いて候補を作り、難しさを測って、
  * 目標に合うものだけを採る。人が目で選ばない。
  *
  * 使い方: npm run gen
@@ -12,33 +12,48 @@ import { writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseLevels } from '../src/core/level.ts'
-import { allowsSingleDirection, TARGETS } from '../src/core/targets.ts'
+import { TARGETS } from '../src/core/targets.ts'
+import { analyze } from '../src/solver/analyze.ts'
 import { solve } from '../src/solver/solve.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+
+/**
+ * 1 面あたり、候補をいくつ作ってみるか。
+ * ここで見つからなくても縛りを緩めて作り直すので、粘りすぎない値にしておく。
+ */
+const ATTEMPTS_PER_LEVEL = 12000
+/**
+ * 目標に合う候補がこれだけ集まったら、その中から選ぶ。
+ * 多く集めるほど目標に近づくが、条件の厳しい面では集まるまでが長い。
+ * 12 個あれば目標との差はほぼ詰まり、生成も現実的な時間で終わる。
+ */
+const CANDIDATES_WANTED = 12
+/**
+ * 1 つの候補を測るときに調べる盤面の数の上限。
+ * 状態空間の広さは人の感じる難しさとほぼ関係が無いので（src/solver/analyze.ts）、
+ * 重い候補を切り捨てても面の難しさは落ちない。生成の時間だけが縮む。
+ */
+const MAX_STATES = 12000
 
 /** 面 01 と各ブロックの頭にだけ出す一言 */
 const TEXTS = {
   1: '指でなぞって動かす',
   7: '箱が増えていきます',
-  13: '回り込んで押す',
-  19: 'ここから本番',
-  25: '最後の6面',
+  13: 'ここから本番',
 }
 
 const TITLES = [
-  'はじめの一歩', 'ひと押し', 'ふた押し', '曲がり角', 'すこし遠く', '行って戻る',
-  '仕切り直し', '寄り道', 'ふたつの箱', '順番がある', '入れ替え', '奥から',
-  'ひと息', '回り込む', '押してから戻る', '遠回り', '両側から', '出口はひとつ',
-  'また仕切り直し', '通路', 'みっつの箱', '詰め込む', '順番を考える', '最後のひと押し',
-  '仕上げの助走', '見えてくる形', 'ひとつずつ', '折り返し', 'あと少し', 'おしまい',
+  'はじめの一歩', 'ひと押し', 'ふたつの箱', '曲がり角', '順番がある', '行って戻る',
+  '仕切り直し', 'みっつの箱', '回り込む', '入れ替え', '奥から', '折り返し',
+  'ひと息', '四つ目', '詰め込む', '両側から', '出口はひとつ', 'おしまい',
 ]
 
 const WALL = '#'
 const FLOOR = ' '
 const GOAL = '.'
 
-/** seed 固定の乱数。誰が走らせても同じ 30 面になる */
+/** seed 固定の乱数。誰が走らせても同じ面になる */
 function makeRandom(seed) {
   let state = seed >>> 0
   return () => {
@@ -216,13 +231,35 @@ function mirror(rows) {
 }
 
 /**
- * 目標に合う面をひとつ作る。見つからなければ null。
+ * その目標に届きうる、押し回数のいちばん小さい値。
+ *
+ * 点数は「押し回数 + 区切り x 1.5 + 持ち替え x 3 + 分解 x 5 + 箱数 x 2」で決まる。
+ * 押し回数がこれを下回る候補は、他がどれだけ良くても目標の下限に届かない。
  */
-function generateOne(random, target, index, seen) {
-  const allowSingleDirection = allowsSingleDirection(index)
+function minPulls(target) {
+  const floor = target.score - target.tolerance
+  const fromBoxes = target.boxes * 2 + target.minBoxChanges * 3 + target.minDecomposition * 5
+  // 区切りは押し回数以下にしかならないので、押し回数 x 2.5 で見積もる
+  return Math.max(1, Math.ceil((floor - fromBoxes) / 2.5))
+}
 
-  // 押し回数が多い面ほど当たりが少ない。7x7・箱 3 個で押し 12 回だと数千回に 1 つ
-  for (let attempt = 0; attempt < 60000; attempt++) {
+/**
+ * 目標に合う面をひとつ作る。見つからなければ null。
+ *
+ * 候補を作っては難しさを測り、目標の点数に近いものを集めて、いちばん近いものを採る。
+ * 最初に見つかったものを採ると、点数の帯の端ばかりが選ばれて面の質がばらつく。
+ */
+function generateOne(random, target, seen) {
+  const found = []
+  // 箱が多い面は 1 つ測るだけで 1 秒以上かかるので、粘らずに見つかった分から選ぶ
+  const heavy = target.boxes >= 4
+  const attempts = heavy ? 2500 : ATTEMPTS_PER_LEVEL
+  const wanted = heavy ? 3 : CANDIDATES_WANTED
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    // 十分に集まったら打ち切る
+    if (found.length >= wanted) break
+
     const board = makeWalls(random, target.size)
     if (!board) continue
     const { walls, floors } = board
@@ -240,7 +277,10 @@ function generateOne(random, target, index, seen) {
     // 長めに引いて、箱を遠くまで運ぶ余地を作る
     const pulled = pullBack(random, walls, target.size, goals, 200)
     if (!pulled) continue
-    if (pulled.pulls < target.pushes) continue
+    // 難しさを測るのは重いので、そこへ渡す前にできるだけ絞る。
+    // 点数はおおよそ「押し回数 + 箱数 x 2」から積み上がるので、
+    // 引いた回数が目標に遠く及ばない候補はここで捨てる
+    if (pulled.pulls < minPulls(target)) continue
 
     // 最初から穴に乗っている箱があれば捨てる
     if (pulled.boxes.some((box) => goals.includes(box))) continue
@@ -259,13 +299,66 @@ function generateOne(random, target, index, seen) {
     }
     if (!level) continue
 
-    const solution = solve(level, { maxPushes: target.pushes })
-    if (!solution) continue
-    if (solution.pushes !== target.pushes) continue
-    if (!allowSingleDirection && solution.pushDirections.length < 2) continue
+    // 難しさを測るのは重いので、先に軽い解答器で明らかに外れたものを捨てる
+    const quick = solve(level)
+    if (!quick) continue
+    if (quick.pushes < minPulls(target)) continue
 
-    seen.add(print)
-    return { rows, solution }
+    // 調べる盤面が多すぎる候補は、測るのに時間がかかる割に難しさは変わらないので捨てる
+    const a = analyze(level, { maxStates: MAX_STATES })
+    if (!a) continue
+    if (Math.abs(a.score - target.score) > target.tolerance) continue
+    if (a.decomposition < target.minDecomposition) continue
+    if (a.boxChanges < target.minBoxChanges) continue
+
+    found.push({ rows, print, analysis: a })
+  }
+
+  if (found.length === 0) return null
+
+  // 目標にいちばん近いものを採る
+  found.sort((x, y) => Math.abs(x.analysis.score - target.score) - Math.abs(y.analysis.score - target.score))
+  const best = found[0]
+  seen.add(best.print)
+  return best
+}
+
+/**
+ * 目標どおりの面が出なければ、縛りを段階的に緩めて作り直す。
+ *
+ * 仕掛けの条件は点数を押し上げるので、点数の帯と噛み合わないことがある。
+ * たとえば向きを 5 回変えるとそれだけで点数が 12.5 上がり、低めの点数とは両立しない。
+ * 1 面でも作れないと全部やり直しになるので、妥協してでも面を埋める。
+ */
+function generateRelaxed(random, target, seen) {
+  const attempts = [
+    { target, note: '' },
+    {
+      target: {
+        ...target,
+        minDecomposition: Math.max(0, target.minDecomposition - 1),
+        tolerance: target.tolerance + 3,
+      },
+      note: '（分解の縛りを 1 段ゆるめた）',
+    },
+    {
+      target: {
+        ...target,
+        minDecomposition: Math.max(0, target.minDecomposition - 2),
+        minBoxChanges: Math.max(0, target.minBoxChanges - 2),
+        tolerance: target.tolerance + 6,
+      },
+      note: '（分解と持ち替えの縛りをゆるめた）',
+    },
+    {
+      target: { ...target, minDecomposition: 0, minBoxChanges: 0, tolerance: target.tolerance + 10 },
+      note: '（縛りを外して点数だけで選んだ）',
+    },
+  ]
+
+  for (const { target: relaxed, note } of attempts) {
+    const made = generateOne(random, relaxed, seen)
+    if (made) return { ...made, note }
   }
   return null
 }
@@ -279,21 +372,36 @@ function main() {
   for (let i = 0; i < TARGETS.length; i++) {
     const index = i + 1
     const target = TARGETS[i]
-    const made = generateOne(random, target, index, seen)
+    const startedAt = performance.now()
+    const made = generateRelaxed(random, target, seen)
     if (!made) {
-      console.error(`面 ${index}: 目標（押し ${target.pushes} 回・箱 ${target.boxes} 個）に合う面が作れなかった`)
+      console.error(
+        `面 ${index}: 縛りを外しても点数 ${target.score} 前後の面が作れなかった。targets.ts の目標を見直す`,
+      )
       process.exit(1)
     }
 
+    const seconds = ((performance.now() - startedAt) / 1000).toFixed(0)
     const number = String(index).padStart(2, '0')
     const lines = [`; ${number} ${TITLES[i]}`]
     if (TEXTS[index]) lines.push(`; text: ${TEXTS[index]}`)
     lines.push(...made.rows)
     out.push(lines.join('\n'))
 
+    const a = made.analysis
     report.push(
-      `面 ${number}  押し ${String(made.solution.pushes).padStart(2)}  手数 ${String(made.solution.moves).padStart(3)}  箱 ${target.boxes}  ${made.rows[0].length}x${made.rows.length}`,
+      [
+        `面 ${number}`,
+        `点数 ${a.score.toFixed(1).padStart(5)}`,
+        `押し ${String(a.pushes).padStart(2)}`,
+        `持ち替え ${String(a.boxChanges).padStart(2)}`,
+        `区切り ${String(a.boxLines).padStart(2)}`,
+        `分解 ${String(a.decomposition).padStart(2)}`,
+        `箱 ${target.boxes}`,
+        `${seconds}秒${made.note}`,
+      ].join('  '),
     )
+    console.error(report[report.length - 1])
   }
 
   const header = [

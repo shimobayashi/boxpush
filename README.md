@@ -1,6 +1,6 @@
 # BOXPUSH
 
-指でなぞって箱を穴に運ぶ、短時間で遊べる箱押しパズル。全 30 面。
+指でなぞって箱を穴に運ぶ、短時間で遊べる箱押しパズル。全 18 面。
 
 遊ぶ: https://shimobayashi.github.io/boxpush/
 
@@ -45,6 +45,7 @@ main に push すると GitHub Actions がテストを回し、通れば GitHub 
 足したら `npm test` を通す。解けること、難易度が目標どおりであることを検査している。
 
 仕様と、そう決めた理由は [docs/design.md](docs/design.md) にある。
+面の作り方と難しさの測り方は [docs/levels.md](docs/levels.md)、演出は [docs/effects.md](docs/effects.md)。
 
 ## ライセンス
 

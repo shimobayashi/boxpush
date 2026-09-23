@@ -351,7 +351,8 @@ function advance(): void {
 }
 
 function showAllClear(): void {
-  levelText.textContent = '全 30 面クリア。おつかれさまでした'
+  // 面数は levels.txt 次第で変わるので、数えた値を出す
+  levelText.textContent = `全 ${levels.length} 面クリア。おつかれさまでした`
   openLevelSelect()
   // 面選択に戻ったあとも最後の面を眺められるよう、盤面はそのままにしておく
   locked = false

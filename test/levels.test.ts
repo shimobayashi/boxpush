@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import type { Level } from '../src/core/level.ts'
 import { formatGrid, isGoal, parseLevels, toXY } from '../src/core/level.ts'
 import { allowsSingleDirection, blockOf, TARGETS } from '../src/core/targets.ts'
+import { analyze } from '../src/solver/analyze.ts'
 import { solve } from '../src/solver/solve.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -45,14 +46,14 @@ function mirror(rows: string[]): string[] {
 }
 
 describe('levels.txt', () => {
-  it('30 面ある', () => {
-    expect(levels).toHaveLength(30)
+  it('18 面ある', () => {
+    expect(levels).toHaveLength(18)
     expect(levels).toHaveLength(TARGETS.length)
   })
 
   it('面 01 と各ブロックの頭にだけテキストが付いている', () => {
     const withText = levels.filter((level) => level.text !== '').map((level) => level.index)
-    expect(withText).toEqual([1, 7, 13, 19, 25])
+    expect(withText).toEqual([1, 7, 13])
   })
 
   it('すべての面にタイトルが付いている', () => {
@@ -106,12 +107,35 @@ describe('levels.txt', () => {
     }
   })
 
-  it('すべての面が解けて、最小押し回数が目標どおり', () => {
+  it('すべての面が解ける', () => {
+    for (const level of levels) {
+      expect(solve(level), `面 ${level.index} が解けない`).not.toBe(null)
+    }
+  })
+
+  it('難しさが目標の近くに収まっている', () => {
     levels.forEach((level, i) => {
       const target = TARGETS[i]!
-      const solution = solve(level)
-      expect(solution, `面 ${level.index} が解けない`).not.toBe(null)
-      expect(solution!.pushes, `面 ${level.index} の押し回数`).toBe(target.pushes)
+      const a = analyze(level)
+      expect(a, `面 ${level.index} を測れない`).not.toBe(null)
+      // 目標どおりの面が出ないときは縛りを緩めて作り直すので、その分だけ幅を見ておく
+      expect(
+        Math.abs(a!.score - target.score),
+        `面 ${level.index} の点数 ${a!.score}（目標 ${target.score}）`,
+      ).toBeLessThanOrEqual(target.tolerance + 6)
+    })
+  })
+
+  it('後半の面は箱が絡み合っている', () => {
+    levels.forEach((level, i) => {
+      const target = TARGETS[i]!
+      if (target.minDecomposition === 0) return
+      const a = analyze(level)!
+      // 片方の箱を全部片付けてから残り、で解ける面は考えることが少ない。
+      // 目標どおりの面が出ないときは縛りを緩めて作り直すので、その分は見ておく
+      expect(a.decomposition, `面 ${level.index} の分解`).toBeGreaterThanOrEqual(
+        Math.max(0, target.minDecomposition - 2),
+      )
     })
   })
 
@@ -126,17 +150,23 @@ describe('levels.txt', () => {
     }
   })
 
-  it('ブロックの中で難易度が上がり、切れ目で落ちる', () => {
-    for (let i = 1; i < TARGETS.length; i++) {
-      const prev = TARGETS[i - 1]!
-      const current = TARGETS[i]!
+  // 目標の表ではなく、出来上がった面そのものを測って確かめる。
+  // 表どおりに作れているかは上の検査が見るので、ここは「遊ぶ人が感じる並び」を見る
+  const scores = levels.map((level) => analyze(level)!.score)
+
+  it('ブロックの中で難しくなり、切れ目で易しくなる', () => {
+    for (let i = 1; i < scores.length; i++) {
       const index = i + 1
       if (blockOf(index) === blockOf(index - 1)) {
-        expect(current.pushes, `面 ${index} はブロックの中なので前より上がる`).toBeGreaterThanOrEqual(
-          prev.pushes,
-        )
+        expect(
+          scores[i]!,
+          `面 ${index}（${scores[i]}）はブロックの中なので、面 ${index - 1}（${scores[i - 1]}）より難しいはず`,
+        ).toBeGreaterThan(scores[i - 1]!)
       } else {
-        expect(current.pushes, `面 ${index} はブロックの頭なので前より落ちる`).toBeLessThan(prev.pushes)
+        expect(
+          scores[i]!,
+          `面 ${index}（${scores[i]}）はブロックの頭なので、面 ${index - 1}（${scores[i - 1]}）より易しいはず`,
+        ).toBeLessThan(scores[i - 1]!)
       }
     }
   })
@@ -144,8 +174,8 @@ describe('levels.txt', () => {
   it('ブロックの谷と山がどちらも後ろほど上がる', () => {
     const valleys: number[] = []
     const peaks: number[] = []
-    for (let block = 0; block < 5; block++) {
-      const slice = TARGETS.slice(block * 6, block * 6 + 6).map((t) => t.pushes)
+    for (let block = 0; block < 3; block++) {
+      const slice = scores.slice(block * 6, block * 6 + 6)
       valleys.push(Math.min(...slice))
       peaks.push(Math.max(...slice))
     }

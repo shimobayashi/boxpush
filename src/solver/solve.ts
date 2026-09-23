@@ -133,7 +133,7 @@ function toDirection(level: Level, step: number): Direction {
  * 上下のどちらかが壁で、かつ左右のどちらかが壁なら、その箱は二度と動かない。
  * 穴の上なら止まっていて構わないので、呼ぶ側で穴かどうかを見る。
  */
-function findDeadCells(level: Level): boolean[] {
+export function findDeadCells(level: Level): boolean[] {
   const dead: boolean[] = new Array(level.width * level.height).fill(false)
   for (let y = 0; y < level.height; y++) {
     for (let x = 0; x < level.width; x++) {
