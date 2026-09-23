@@ -134,6 +134,45 @@ export class Effects {
     }
   }
 
+  /**
+   * 穴へ吸い寄せられていく粒。
+   * 外から中心へ向かって飛ばすことで、何かが溜まっていく感じを出す。
+   */
+  gather(x: number, y: number, cell: number): void {
+    const angle = Math.random() * Math.PI * 2
+    const distance = cell * (1.4 + Math.random() * 1.2)
+    const speed = distance / 0.26
+    this.particles.push({
+      x: x + Math.cos(angle) * distance,
+      y: y + Math.sin(angle) * distance,
+      // 中心へ向かう向き。寿命が尽きるころに着く
+      vx: -Math.cos(angle) * speed,
+      vy: -Math.sin(angle) * speed,
+      life: 0.26,
+      born: 0.26,
+      size: cell * (0.03 + Math.random() * 0.035),
+      color: '#ffe9a8',
+      spin: 0,
+      angle: 0,
+      gravity: 0,
+      streak: true,
+    })
+  }
+
+  /** 画面いっぱいに広がる衝撃波。箱が決まった瞬間に出す */
+  shockwave(x: number, y: number, cell: number, strength: number): void {
+    this.ripples.push({
+      x,
+      y,
+      radius: cell * 0.2,
+      speed: cell * (14 + strength * 6),
+      life: 0.45 + strength * 0.1,
+      born: 0.45 + strength * 0.1,
+      color: '255, 255, 255',
+      width: Math.max(3, cell * 0.1 * strength),
+    })
+  }
+
   /** 人が歩いた足元から、小さな輪を広げる */
   footprint(x: number, y: number, cell: number): void {
     this.ripples.push({
