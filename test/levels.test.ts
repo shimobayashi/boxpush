@@ -46,14 +46,14 @@ function mirror(rows: string[]): string[] {
 }
 
 describe('levels.txt', () => {
-  it('30 面ある', () => {
-    expect(levels).toHaveLength(30)
+  it('18 面ある', () => {
+    expect(levels).toHaveLength(18)
     expect(levels).toHaveLength(TARGETS.length)
   })
 
   it('面 01 と各ブロックの頭にだけテキストが付いている', () => {
     const withText = levels.filter((level) => level.text !== '').map((level) => level.index)
-    expect(withText).toEqual([1, 7, 13, 19, 25])
+    expect(withText).toEqual([1, 7, 13])
   })
 
   it('すべての面にタイトルが付いている', () => {
@@ -126,13 +126,15 @@ describe('levels.txt', () => {
     })
   })
 
-  it('どう押しても解けてしまう面が後半に無い', () => {
+  it('後半の面は箱が絡み合っている', () => {
     levels.forEach((level, i) => {
-      if (blockOf(level.index) < 3) return
+      const target = TARGETS[i]!
+      if (target.minDecomposition === 0) return
       const a = analyze(level)!
-      // 正解が多い面は、押し回数が多くても考えることが無い
-      expect(a.optimalPaths, `面 ${level.index} の正解の数`).toBeLessThanOrEqual(
-        TARGETS[i]!.maxPaths * 2,
+      // 片方の箱を全部片付けてから残り、で解ける面は考えることが少ない。
+      // 目標どおりの面が出ないときは縛りを緩めて作り直すので、その分は見ておく
+      expect(a.decomposition, `面 ${level.index} の分解`).toBeGreaterThanOrEqual(
+        Math.max(0, target.minDecomposition - 2),
       )
     })
   })
@@ -172,7 +174,7 @@ describe('levels.txt', () => {
   it('ブロックの谷と山がどちらも後ろほど上がる', () => {
     const valleys: number[] = []
     const peaks: number[] = []
-    for (let block = 0; block < 5; block++) {
+    for (let block = 0; block < 3; block++) {
       const slice = scores.slice(block * 6, block * 6 + 6)
       valleys.push(Math.min(...slice))
       peaks.push(Math.max(...slice))
