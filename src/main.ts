@@ -315,6 +315,7 @@ function onCleared(): void {
   const level = game.level
   const { cell } = renderer.boardOrigin(level.width, level.height)
   effects.confetti(canvas.clientWidth, canvas.clientHeight, cell)
+  effects.whiteOut(0.6, 'gold')
   sound.clear()
   vibrate(sound, [0, 40, 60, 80])
 
