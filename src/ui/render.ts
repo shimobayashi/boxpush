@@ -112,6 +112,14 @@ export class Renderer {
       ctx.translate(-boardWidth / 2, -boardHeight / 2)
     }
 
+    // 吸い込まれている間はゆっくり寄る。引き込まれる感じを出す
+    if (state.motion?.slow) {
+      const zoom = 1 + state.motion.progress * 0.07
+      ctx.translate(boardWidth / 2, boardHeight / 2)
+      ctx.scale(zoom, zoom)
+      ctx.translate(-boardWidth / 2, -boardHeight / 2)
+    }
+
     this.drawFloorAndWalls(level, cell, state.clearProgress)
     this.drawGoals(state, cell)
     this.drawReaches(state, cell)
@@ -120,7 +128,8 @@ export class Renderer {
     // 吸い込まれている間は周りを落として、箱と穴だけに目が行くようにする
     if (state.motion?.slow) {
       ctx.save()
-      ctx.globalAlpha = Math.sin(state.motion.progress * Math.PI) * 0.45
+      // 進むほど濃くする。入る直前が一番暗い
+      ctx.globalAlpha = state.motion.progress ** 0.7 * 0.78
       ctx.fillStyle = '#05070d'
       ctx.fillRect(0, 0, boardWidth, boardHeight)
       ctx.restore()
@@ -356,6 +365,9 @@ export class Renderer {
       // 押されている間だけ、進む向きに潰れて戻る
       let scaleX = 1
       let scaleY = 1
+      let shakeX = 0
+      let shakeY = 0
+      const sucking = state.motion?.slow === true && state.motion.pushedBox === box
       if (state.motion && state.motion.pushedBox === box) {
         const t = state.motion.progress
         const squash = Math.sin(t * Math.PI) * 0.18
@@ -365,10 +377,21 @@ export class Renderer {
           scaleX = horizontal ? 1 - squash : 1 + squash * 0.6
           scaleY = horizontal ? 1 + squash * 0.6 : 1 - squash
         }
+        if (sucking) {
+          // 入る直前ほど激しく震わせる
+          const tremor = cell * 0.05 * t ** 2
+          shakeX = (Math.random() - 0.5) * tremor
+          shakeY = (Math.random() - 0.5) * tremor
+        }
       }
 
       ctx.save()
-      if (fresh) {
+      if (sucking) {
+        // 入る前から金色に寄せていき、光を強めていく
+        const t = state.motion!.progress
+        ctx.shadowColor = '#ffd166'
+        ctx.shadowBlur = cell * (0.3 + t * 0.9)
+      } else if (fresh) {
         // はまった直後だけ強く光らせる
         ctx.shadowColor = '#ffd166'
         ctx.shadowBlur = cell * 0.7
@@ -380,11 +403,11 @@ export class Renderer {
         ctx.shadowBlur = cell * 0.28
       }
 
-      ctx.translate(centerX, centerY)
+      ctx.translate(centerX + shakeX, centerY + shakeY)
       ctx.scale(scaleX, scaleY)
 
       const gradient = ctx.createLinearGradient(0, -size / 2, 0, size / 2)
-      if (onGoal) {
+      if (onGoal || sucking) {
         gradient.addColorStop(0, '#ffe3a0')
         gradient.addColorStop(1, '#f0a93c')
       } else {
