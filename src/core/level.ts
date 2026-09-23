@@ -49,6 +49,20 @@ export function isGoal(level: Level, pos: number): boolean {
   return level.goals[pos] === true
 }
 
+/**
+ * from から step だけ動いた先の to が、盤面の中か。
+ *
+ * 盤面を 1 次元の配列で持っているので、左右に動くと行を飛び越えて
+ * 隣の行の端につながってしまう。それも弾く。
+ */
+export function inLine(level: Level, from: number, to: number, step: number): boolean {
+  if (to < 0 || to >= level.width * level.height) return false
+  if (step === -1 || step === 1) {
+    return Math.floor(from / level.width) === Math.floor(to / level.width)
+  }
+  return true
+}
+
 export class LevelParseError extends Error {}
 
 /**
@@ -186,7 +200,7 @@ export function formatGrid(level: Level, boxes: readonly number[], player: numbe
   for (let y = 0; y < level.height; y++) {
     let row = ''
     for (let x = 0; x < level.width; x++) {
-      const pos = y * level.width + x
+      const pos = at(level, x, y)
       if (level.walls[pos]) row += WALL
       else if (boxSet.has(pos)) row += level.goals[pos] ? BOX_ON_GOAL : BOX
       else if (pos === player) row += level.goals[pos] ? PLAYER_ON_GOAL : PLAYER

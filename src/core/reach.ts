@@ -7,7 +7,8 @@
 
 import type { Direction, Game } from './game.ts'
 import { DIRECTIONS, delta } from './game.ts'
-import { isGoal, isWall } from './level.ts'
+import { inLine, isGoal } from './level.ts'
+import { zoneLabels } from './zone.ts'
 
 export type Reach = {
   /** 今の箱の位置 */
@@ -23,7 +24,8 @@ export type Reach = {
  */
 export function findReaches(game: Game): Reach[] {
   const level = game.level
-  const reachable = walkableFrom(game)
+  const zones = zoneLabels(level, game.boxes)
+  const here = zones[game.player]
   const found: Reach[] = []
 
   for (const box of game.boxes) {
@@ -32,51 +34,15 @@ export function findReaches(game: Game): Reach[] {
       const step = delta(level, direction)
       const ahead = box + step
       const behind = box - step
-      if (!sameLine(level, box, ahead, step)) continue
-      if (!sameLine(level, box, behind, step)) continue
-      if (!isGoal(level, ahead)) continue
-      if (isWall(level, ahead) || game.hasBox(ahead)) continue
+      if (!inLine(level, box, ahead, step)) continue
+      if (!inLine(level, box, behind, step)) continue
+      // 穴なら壁ではないので、行き先が空いているかは箱の有無だけ見れば足りる
+      if (!isGoal(level, ahead) || game.hasBox(ahead)) continue
       // 人が箱の反対側に立てないと押せない
-      if (!reachable.has(behind)) continue
+      if (zones[behind] !== here) continue
       found.push({ box, goal: ahead, direction })
     }
   }
 
   return found
-}
-
-/** 人が今いる場所から、箱を動かさずに歩いて行けるマス */
-function walkableFrom(game: Game): Set<number> {
-  const level = game.level
-  const seen = new Set<number>([game.player])
-  const queue = [game.player]
-
-  while (queue.length > 0) {
-    const pos = queue.pop()!
-    for (const direction of DIRECTIONS) {
-      const step = delta(level, direction)
-      const next = pos + step
-      if (!sameLine(level, pos, next, step)) continue
-      if (seen.has(next)) continue
-      if (isWall(level, next) || game.hasBox(next)) continue
-      seen.add(next)
-      queue.push(next)
-    }
-  }
-
-  return seen
-}
-
-/** 盤面をはみ出していないか。左右の動きは行をまたがないことも見る */
-function sameLine(
-  level: Game['level'],
-  from: number,
-  to: number,
-  step: number,
-): boolean {
-  if (to < 0 || to >= level.width * level.height) return false
-  if (step === -1 || step === 1) {
-    return Math.floor(from / level.width) === Math.floor(to / level.width)
-  }
-  return true
 }
