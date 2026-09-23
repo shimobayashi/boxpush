@@ -6,6 +6,7 @@
 import type { Game } from '../core/game.ts'
 import type { Level } from '../core/level.ts'
 import { isGoal, isWall, toXY } from '../core/level.ts'
+import type { Reach } from '../core/reach.ts'
 import type { Effects } from './effects.ts'
 
 const COLORS = {
@@ -23,6 +24,8 @@ export type Motion = {
   playerFrom: number
   /** いま押されている箱。潰れて戻る動きを付ける */
   pushedBox: number | null
+  /** 箱が穴に入る一手。ゆっくり吸い込まれるように見せる */
+  slow: boolean
 }
 
 export type RenderState = {
@@ -38,6 +41,8 @@ export type RenderState = {
   trail: readonly { pos: number; age: number }[]
   /** 何面続けてクリアしているか。背景の濃さに使う */
   streak: number
+  /** あと 1 手で入る箱と穴の組。予告を出す */
+  reaches: readonly Reach[]
 }
 
 export class Renderer {
@@ -107,9 +112,29 @@ export class Renderer {
       ctx.translate(-boardWidth / 2, -boardHeight / 2)
     }
 
+    // 吸い込まれている間はゆっくり寄る。引き込まれる感じを出す
+    if (state.motion?.slow) {
+      const zoom = 1 + state.motion.progress * 0.07
+      ctx.translate(boardWidth / 2, boardHeight / 2)
+      ctx.scale(zoom, zoom)
+      ctx.translate(-boardWidth / 2, -boardHeight / 2)
+    }
+
     this.drawFloorAndWalls(level, cell, state.clearProgress)
     this.drawGoals(state, cell)
+    this.drawReaches(state, cell)
     this.drawTrail(state, cell)
+
+    // 吸い込まれている間は周りを落として、箱と穴だけに目が行くようにする
+    if (state.motion?.slow) {
+      ctx.save()
+      // 進むほど濃くする。入る直前が一番暗い
+      ctx.globalAlpha = state.motion.progress ** 0.7 * 0.78
+      ctx.fillStyle = '#05070d'
+      ctx.fillRect(0, 0, boardWidth, boardHeight)
+      ctx.restore()
+    }
+
     this.drawBoxes(state, cell)
     this.drawPlayer(state, cell)
     this.drawGoalUnderPlayer(state, cell)
@@ -257,6 +282,53 @@ export class Renderer {
     ctx.restore()
   }
 
+  /**
+   * あと 1 手で入る箱と穴を、光の線で結ぶ。
+   * 結果が出たあとにしか演出が無いと気持ちが高ぶる時間が生まれないので、押す前に見せる。
+   */
+  private drawReaches(state: RenderState, cell: number): void {
+    if (state.reaches.length === 0) return
+    const level = state.game.level
+    const ctx = this.ctx
+    const pulse = 0.5 + 0.5 * Math.sin(this.clock * 9)
+
+    for (const reach of state.reaches) {
+      const box = toXY(level, reach.box)
+      const goal = toXY(level, reach.goal)
+      const fromX = box.x * cell + cell / 2
+      const fromY = box.y * cell + cell / 2
+      const toX = goal.x * cell + cell / 2
+      const toY = goal.y * cell + cell / 2
+
+      ctx.save()
+      ctx.globalAlpha = 0.45 + pulse * 0.45
+      ctx.strokeStyle = '#ffd166'
+      ctx.lineWidth = Math.max(2, cell * (0.05 + pulse * 0.04))
+      ctx.shadowColor = '#ffd166'
+      ctx.shadowBlur = cell * (0.3 + pulse * 0.4)
+      // 流れて見えるよう、破線をずらしながら描く
+      ctx.setLineDash([cell * 0.14, cell * 0.12])
+      ctx.lineDashOffset = -this.clock * cell * 1.6
+      ctx.beginPath()
+      ctx.moveTo(fromX, fromY)
+      ctx.lineTo(toX, toY)
+      ctx.stroke()
+      ctx.restore()
+
+      // 入る先の穴を強く光らせる
+      ctx.save()
+      ctx.globalAlpha = 0.5 + pulse * 0.5
+      ctx.strokeStyle = '#fff0c0'
+      ctx.lineWidth = Math.max(2, cell * 0.07)
+      ctx.shadowColor = '#ffd166'
+      ctx.shadowBlur = cell * (0.4 + pulse * 0.6)
+      ctx.beginPath()
+      ctx.arc(toX, toY, cell * (0.26 + pulse * 0.06), 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.restore()
+    }
+  }
+
   /** 人が通ってきた跡。どう動いたかが目で追えるようにする */
   private drawTrail(state: RenderState, cell: number): void {
     if (state.trail.length === 0) return
@@ -293,6 +365,9 @@ export class Renderer {
       // 押されている間だけ、進む向きに潰れて戻る
       let scaleX = 1
       let scaleY = 1
+      let shakeX = 0
+      let shakeY = 0
+      const sucking = state.motion?.slow === true && state.motion.pushedBox === box
       if (state.motion && state.motion.pushedBox === box) {
         const t = state.motion.progress
         const squash = Math.sin(t * Math.PI) * 0.18
@@ -302,10 +377,21 @@ export class Renderer {
           scaleX = horizontal ? 1 - squash : 1 + squash * 0.6
           scaleY = horizontal ? 1 + squash * 0.6 : 1 - squash
         }
+        if (sucking) {
+          // 入る直前ほど激しく震わせる
+          const tremor = cell * 0.05 * t ** 2
+          shakeX = (Math.random() - 0.5) * tremor
+          shakeY = (Math.random() - 0.5) * tremor
+        }
       }
 
       ctx.save()
-      if (fresh) {
+      if (sucking) {
+        // 入る前から金色に寄せていき、光を強めていく
+        const t = state.motion!.progress
+        ctx.shadowColor = '#ffd166'
+        ctx.shadowBlur = cell * (0.3 + t * 0.9)
+      } else if (fresh) {
         // はまった直後だけ強く光らせる
         ctx.shadowColor = '#ffd166'
         ctx.shadowBlur = cell * 0.7
@@ -317,11 +403,11 @@ export class Renderer {
         ctx.shadowBlur = cell * 0.28
       }
 
-      ctx.translate(centerX, centerY)
+      ctx.translate(centerX + shakeX, centerY + shakeY)
       ctx.scale(scaleX, scaleY)
 
       const gradient = ctx.createLinearGradient(0, -size / 2, 0, size / 2)
-      if (onGoal) {
+      if (onGoal || sucking) {
         gradient.addColorStop(0, '#ffe3a0')
         gradient.addColorStop(1, '#f0a93c')
       } else {

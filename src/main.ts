@@ -8,6 +8,8 @@ import levelsText from '../levels.txt?raw'
 import type { Direction } from './core/game.ts'
 import { Game } from './core/game.ts'
 import { isGoal, parseLevels, toXY } from './core/level.ts'
+import type { Reach } from './core/reach.ts'
+import { findReaches } from './core/reach.ts'
 import { Sound, vibrate } from './ui/audio.ts'
 import { Effects } from './ui/effects.ts'
 import { Input } from './ui/input.ts'
@@ -29,6 +31,19 @@ const JUST_FIT_SECONDS = 0.4
 const TRAIL_SECONDS = 0.5
 /** 跡として残す最大の数 */
 const TRAIL_LIMIT = 8
+/** 箱が穴に入る一手だけ、移動をこの倍だけ長くかけて吸い込まれるように見せる */
+const FIT_SLOWDOWN = 7
+/** 吸い込まれ切った瞬間に、これだけ画面を止めてから爆発させる */
+const HIT_STOP_SECONDS = 0.18
+/** クリア演出の残り秒数がこの値を切ったときに、紙吹雪を追加で降らせる */
+const CONFETTI_WAVES = [1.15, 0.85, 0.5]
+/**
+ * 紙吹雪が、次の面に移ってからも残る秒数。
+ * 少しだけ残っている方が続けて遊んでいる感じが出るが、
+ * 降り続けると盤面が読み取りにくくなる。
+ * 撒いた時点の残り時間にこれを足したぶんを、その紙の寿命にする。
+ */
+const CONFETTI_TAIL_SECONDS = 0.25
 
 const canvas = must<HTMLCanvasElement>('#board')
 const levelLabel = must<HTMLElement>('#level-label')
@@ -62,6 +77,14 @@ let trail: { pos: number; age: number }[] = []
 let lastOneNotified = false
 /** やり直さずに何面続けてクリアしたか */
 let streak = 0
+/** 箱が吸い込まれ切るのを待っている間、演出をここに置いておく */
+let pendingFit: number[] | null = null
+/** 演出を出す前の、画面を止めておく残り秒数 */
+let hitStop = 0
+/** あと 1 手で入る箱と穴。予告に使う */
+let reaches: Reach[] = []
+/** 予告中に粒を出す間隔を測るための時計 */
+let reachSpawn = 0
 /** クリア時に手数を数え上げて見せるための、今表示している値 */
 let countedMoves = 0
 
@@ -84,7 +107,10 @@ function startLevel(index: number): void {
   trail = []
   lastOneNotified = false
   countedMoves = 0
-  // 紙吹雪はここで消さない。次の面が始まってからも降り続ける方が続けて遊んでいる感じが出る
+  pendingFit = null
+  hitStop = 0
+  reaches = []
+  // 紙吹雪はここで消さない。撒いた時点で寿命を決めてあるので、少し残ってから自然に消える
 
   progress = { ...progress, current: index }
   saveProgress(progress)
@@ -93,6 +119,7 @@ function startLevel(index: number): void {
   levelText.textContent = level.text
   input.release()
   input.setCellSize(renderer.cellSize(level.width, level.height))
+  updateReaches(false)
   updateHud()
 }
 
@@ -130,7 +157,7 @@ function step(direction: Direction): void {
     from.set(box, findMovedFrom(box, before, direction))
     pushedBox = box
   }
-  motion = { progress: 0, from, playerFrom: playerBefore, pushedBox }
+  motion = { progress: 0, from, playerFrom: playerBefore, pushedBox, slow: false }
 
   trail.unshift({ pos: playerBefore, age: 0 })
   if (trail.length > TRAIL_LIMIT) trail.length = TRAIL_LIMIT
@@ -164,24 +191,47 @@ function step(direction: Direction): void {
   const fitAfter = fitBoxes()
   const fresh = [...fitAfter].filter((box) => !fitBefore.has(box))
   if (fresh.length > 0) {
-    onFit(fresh)
+    if (game.cleared) {
+      // 最後の 1 つだけ溜める。途中の箱まで毎回止めると、続けて解く流れが切れる
+      motion.slow = true
+      pendingFit = fresh
+      sound.suck()
+    } else {
+      onFit(fresh)
+    }
   } else if (fitAfter.size < fitBefore.size) {
     justFit = new Set()
     fitCount = Math.max(0, fitCount - 1)
     sound.unfit()
   }
 
+  updateReaches()
   notifyLastOne()
   updateHud()
-
-  if (game.cleared) {
-    onCleared()
-  }
 }
 
-/** 残りがあと 1 つになったら、一度だけ知らせる */
+/**
+ * 予告を出し直す。
+ * notify が true なら、新しく立ったときに音で知らせる。
+ * 面を始めたときや戻したときは、こちらから動かしたわけではないので鳴らさない。
+ */
+function updateReaches(notify = true): void {
+  // 数だけ見ると、別の箱の予告に入れ替わったときに気づけない
+  const before = new Set(reaches.map((r) => `${r.box}>${r.goal}`))
+  // 予告は面の最後の 1 つだけ。途中の箱でも出すと、ここぞという感じが薄れる
+  const quiet = locked || pendingFit !== null || !isLastOne()
+  reaches = quiet ? [] : findReaches(game)
+  const appeared = reaches.some((r) => !before.has(`${r.box}>${r.goal}`))
+  if (notify && appeared) sound.reach()
+}
+
+/**
+ * 残りがあと 1 つになったら、一度だけ知らせる。
+ * 箱が最初から 1 つしかない面では、減った実感が無いので鳴らさない。
+ */
 function notifyLastOne(): void {
   if (game.cleared) return
+  if (game.level.boxStarts.length < 2) return
   const remaining = game.level.boxStarts.length - fitBoxes().size
   if (remaining === 1) {
     if (!lastOneNotified) {
@@ -230,12 +280,16 @@ function onFit(fresh: number[]): void {
   // 入れるたびに派手さを積み増す。1 つ目より 2 つ目、2 つ目より 3 つ目が強い。
   // 最後の 1 つが決まった瞬間だけ、けた違いにする
   const final = game.cleared
-  const strength = final ? 4.5 : 1.8 + fitCount * 0.6
+  const strength = final ? 6 : 2.6 + fitCount * 0.8
 
   const { cell, x, y } = renderer.boardOrigin(level.width, level.height)
   for (const box of fresh) {
     const at = toXY(level, box)
-    effects.burst(x + at.x * cell + cell / 2, y + at.y * cell + cell / 2, cell, strength)
+    const cx = x + at.x * cell + cell / 2
+    const cy = y + at.y * cell + cell / 2
+    effects.burst(cx, cy, cell, strength)
+    // 溜めたぶんを解き放つ衝撃波。画面の外まで走り抜ける
+    effects.shockwave(cx, cy, cell, strength)
   }
 
   if (final) {
@@ -243,10 +297,10 @@ function onFit(fresh: number[]): void {
     sound.finalFit()
     vibrate(sound, [0, 60])
   } else {
-    // 金色に軽く飛ばす。入れた数が増えるほど強くする
-    effects.whiteOut(Math.min(0.45, 0.2 + fitCount * 0.1), 'gold')
+    // 金色に飛ばす。入れた数が増えるほど強くする
+    effects.whiteOut(Math.min(0.75, 0.42 + fitCount * 0.12), 'gold')
     sound.fit(fitCount)
-    vibrate(sound, 22 + fitCount * 8)
+    vibrate(sound, [0, 35 + fitCount * 10])
   }
   fitCount += fresh.length
 }
@@ -267,7 +321,9 @@ function onCleared(): void {
 
   const level = game.level
   const { cell } = renderer.boardOrigin(level.width, level.height)
-  effects.confetti(canvas.clientWidth, canvas.clientHeight, cell)
+  // 次の面に移るまでの時間に、少しだけ残るぶんを足したのがこの紙の寿命
+  effects.confetti(canvas.clientWidth, canvas.clientHeight, cell, CLEAR_SECONDS + CONFETTI_TAIL_SECONDS)
+  effects.whiteOut(0.6, 'gold')
   sound.clear()
   vibrate(sound, [0, 40, 60, 80])
 
@@ -335,6 +391,7 @@ undoButton.addEventListener('click', () => {
   motion = null
   justFit = new Set()
   fitCount = fitBoxes().size
+  updateReaches(false)
   updateHud()
 })
 
@@ -349,6 +406,7 @@ resetButton.addEventListener('click', () => {
   // やり直したら連続クリアは途切れる。背景の熱も冷める
   streak = 0
   effects.clear()
+  updateReaches(false)
   updateHud()
 })
 
@@ -384,9 +442,47 @@ function frame(now: number): void {
   const dt = Math.min(0.05, (now - lastTime) / 1000)
   lastTime = now
 
+  // 吸い込まれ切ったあとの静止。ここでは何も進めない
+  if (hitStop > 0) {
+    hitStop -= dt
+    if (hitStop <= 0) {
+      hitStop = 0
+      const fresh = pendingFit
+      pendingFit = null
+      if (fresh) {
+        onFit(fresh)
+        updateReaches()
+        notifyLastOne()
+        if (game.cleared) onCleared()
+      }
+    }
+    draw(0)
+    requestAnimationFrame(frame)
+    return
+  }
+
   if (motion) {
-    motion.progress += dt / STEP_SECONDS
-    if (motion.progress >= 1) motion = null
+    motion.progress += dt / (STEP_SECONDS * (motion.slow ? FIT_SLOWDOWN : 1))
+
+    // 吸い込まれている間、入る先の穴へ粒を集める。溜まっていくのが目に見える
+    if (motion.slow && pendingFit) {
+      const board = renderer.boardOrigin(game.level.width, game.level.height)
+      for (const box of pendingFit) {
+        const at = toXY(game.level, box)
+        const cx = board.x + at.x * board.cell + board.cell / 2
+        const cy = board.y + at.y * board.cell + board.cell / 2
+        // 進むほど密に集める
+        const count = 1 + Math.floor(motion.progress * 3)
+        for (let i = 0; i < count; i++) effects.gather(cx, cy, board.cell)
+      }
+    }
+
+    if (motion.progress >= 1) {
+      const wasSlow = motion.slow
+      motion = null
+      // 吸い込み切った瞬間に一拍おいてから爆発させる
+      if (wasSlow && pendingFit) hitStop = HIT_STOP_SECONDS
+    }
   }
 
   if (justFitTimer > 0) {
@@ -400,8 +496,36 @@ function frame(now: number): void {
   for (const mark of trail) mark.age += dt / TRAIL_SECONDS
   trail = trail.filter((mark) => mark.age < 1)
 
+  // 予告が出ている間は、入る先の穴へ粒をちらちら流し続ける
+  if (reaches.length > 0) {
+    reachSpawn += dt
+    if (reachSpawn > 0.07) {
+      reachSpawn = 0
+      const board = renderer.boardOrigin(game.level.width, game.level.height)
+      for (const reach of reaches) {
+        const at = toXY(game.level, reach.goal)
+        effects.gather(
+          board.x + at.x * board.cell + board.cell / 2,
+          board.y + at.y * board.cell + board.cell / 2,
+          board.cell,
+        )
+      }
+    }
+  }
+
   if (clearTimer > 0) {
+    const before = clearTimer
     clearTimer -= dt
+
+    // 一度に全部撒くと最初の一瞬で終わるので、何度かに分けて降らせ続ける
+    for (const at of CONFETTI_WAVES) {
+      if (before > at && clearTimer <= at) {
+        const { cell } = renderer.boardOrigin(game.level.width, game.level.height)
+        // 遅く撒いた紙ほど短命にして、どの波も次の面で同じころに消え切るようにする
+        effects.rain(canvas.clientWidth, canvas.clientHeight, cell, 70, at + CONFETTI_TAIL_SECONDS)
+      }
+    }
+
     // 手数を数え上げて見せる。演出の前半で数え切る
     if (countedMoves < game.moves) {
       countedMoves = Math.min(game.moves, countedMoves + Math.ceil(game.moves * dt * 2.5))
@@ -413,8 +537,12 @@ function frame(now: number): void {
     }
   }
 
-  effects.update(dt)
+  draw(dt)
+  requestAnimationFrame(frame)
+}
 
+function draw(dt: number): void {
+  effects.update(dt)
   renderer.draw(
     {
       game,
@@ -424,12 +552,11 @@ function frame(now: number): void {
       lastOne: isLastOne(),
       trail,
       streak,
+      reaches,
     },
     effects,
     dt,
   )
-
-  requestAnimationFrame(frame)
 }
 
 function handleResize(): void {

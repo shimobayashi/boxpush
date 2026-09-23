@@ -20,6 +20,8 @@ export type Particle = {
   gravity: number
   /** 進む向きに細長く伸ばして描く。飛び散る光の線に使う */
   streak?: boolean
+  /** 紙が空気を受けて左右に揺れる位相。真下に落ちるだけだと単調なため */
+  wobble?: number
 }
 
 const FIT_COLORS = ['#ffd166', '#ffe9a8', '#ffffff', '#4dd8ff']
@@ -45,6 +47,8 @@ export class Effects {
   /** 画面全体を飛ばす強さ。0 なら何もしない */
   private flash = 0
   private flashTone: 'white' | 'gold' = 'white'
+  /** 紙の揺れを進めるための時計 */
+  private clock = 0
 
   get shakeAmount(): number {
     return this.shake
@@ -134,6 +138,45 @@ export class Effects {
     }
   }
 
+  /**
+   * 穴へ吸い寄せられていく粒。
+   * 外から中心へ向かって飛ばすことで、何かが溜まっていく感じを出す。
+   */
+  gather(x: number, y: number, cell: number): void {
+    const angle = Math.random() * Math.PI * 2
+    const distance = cell * (1.4 + Math.random() * 1.2)
+    const speed = distance / 0.26
+    this.particles.push({
+      x: x + Math.cos(angle) * distance,
+      y: y + Math.sin(angle) * distance,
+      // 中心へ向かう向き。寿命が尽きるころに着く
+      vx: -Math.cos(angle) * speed,
+      vy: -Math.sin(angle) * speed,
+      life: 0.26,
+      born: 0.26,
+      size: cell * (0.03 + Math.random() * 0.035),
+      color: '#ffe9a8',
+      spin: 0,
+      angle: 0,
+      gravity: 0,
+      streak: true,
+    })
+  }
+
+  /** 画面いっぱいに広がる衝撃波。箱が決まった瞬間に出す */
+  shockwave(x: number, y: number, cell: number, strength: number): void {
+    this.ripples.push({
+      x,
+      y,
+      radius: cell * 0.2,
+      speed: cell * (14 + strength * 6),
+      life: 0.45 + strength * 0.1,
+      born: 0.45 + strength * 0.1,
+      color: '255, 255, 255',
+      width: Math.max(3, cell * 0.1 * strength),
+    })
+  }
+
   /** 人が歩いた足元から、小さな輪を広げる */
   footprint(x: number, y: number, cell: number): void {
     this.ripples.push({
@@ -164,34 +207,81 @@ export class Effects {
     }
   }
 
-  /** 面クリア。上から紙吹雪が降る */
-  confetti(width: number, height: number, cell: number): void {
-    for (let i = 0; i < 200; i++) {
+  /**
+   * 面クリア。下の両隅から打ち上げて、そのあと上からも降らせる。
+   * 上から降らせるだけだと一方向で単調に見えるため。
+   *
+   * life は、この紙が消えるまでのおおよその秒数。
+   * 呼ぶ側が「次の面に入ってから少しだけ残る」長さを渡す。
+   */
+  confetti(width: number, height: number, cell: number, life: number): void {
+    // 左右の下隅から斜め上へ打ち上げる
+    for (const side of [0, 1]) {
+      const originX = side === 0 ? 0 : width
+      const aim = side === 0 ? 1 : -1
+      for (let i = 0; i < 70; i++) {
+        // 斜め上へ扇状に散らす
+        const spread = Math.random() * 0.9 + 0.15
+        const speed = cell * (9 + Math.random() * 7)
+        this.particles.push({
+          x: originX,
+          y: height,
+          vx: Math.cos(spread) * speed * aim,
+          vy: -Math.sin(spread) * speed - cell * 4,
+          life: life + Math.random() * 0.45,
+          born: life + 0.45,
+          size: cell * (0.1 + Math.random() * 0.11),
+          color: CLEAR_COLORS[i % CLEAR_COLORS.length]!,
+          spin: (Math.random() - 0.5) * 16,
+          angle: Math.random() * Math.PI,
+          gravity: cell * 7,
+          wobble: Math.random() * Math.PI * 2,
+        })
+      }
+    }
+    this.rain(width, height, cell, 90, life)
+    this.shake = Math.max(this.shake, cell * 0.3)
+  }
+
+  /**
+   * 上から紙が舞い落ちる。クリア演出の間、何度かに分けて呼ぶ。
+   * life は消えるまでのおおよその秒数。
+   */
+  rain(width: number, height: number, cell: number, count: number, life: number): void {
+    for (let i = 0; i < count; i++) {
       this.particles.push({
         x: Math.random() * width,
-        y: -Math.random() * height * 0.3,
+        y: -Math.random() * height * 0.25,
         vx: (Math.random() - 0.5) * cell * 2,
-        vy: cell * (1.5 + Math.random() * 2.5),
-        life: 1.4 + Math.random() * 0.8,
-        born: 2.2,
-        size: cell * (0.09 + Math.random() * 0.09),
+        // 落ちる速さに幅を持たせて、速いものとゆっくり舞うものを混ぜる
+        vy: cell * (1.2 + Math.random() * 3.4),
+        life: life + Math.random() * 0.45,
+        born: life + 0.45,
+        size: cell * (0.1 + Math.random() * 0.1),
         color: CLEAR_COLORS[i % CLEAR_COLORS.length]!,
-        spin: (Math.random() - 0.5) * 12,
+        spin: (Math.random() - 0.5) * 14,
         angle: Math.random() * Math.PI,
-        gravity: cell * 2.2,
+        gravity: cell * 1.6,
+        wobble: Math.random() * Math.PI * 2,
       })
     }
-    this.shake = Math.max(this.shake, cell * 0.22)
   }
 
   update(dt: number): void {
+    this.clock += dt
     for (const p of this.particles) {
       p.x += p.vx * dt
       p.y += p.vy * dt
+      if (p.wobble !== undefined) {
+        // 紙が空気を受けて左右に流れる。真下に落ちるだけだと作り物に見える
+        p.x += Math.sin(this.clock * 5 + p.wobble) * p.size * 9 * dt
+      }
       p.vy += p.gravity * dt
-      // 空気抵抗。粒がすぐ止まって散らばったままにならないよう、ゆるく減速させる
-      p.vx *= 1 - 2.5 * dt
-      p.vy *= 1 - 0.8 * dt
+      // 空気抵抗。粒がすぐ止まって散らばったままにならないよう、ゆるく減速させる。
+      // 紙は打ち上げた勢いを残したいので、落ちる向きには効かせない
+      const paper = p.wobble !== undefined
+      p.vx *= 1 - (paper ? 1.2 : 2.5) * dt
+      if (!paper) p.vy *= 1 - 0.8 * dt
       p.angle += p.spin * dt
       p.life -= dt
     }
