@@ -33,6 +33,7 @@ const TRAIL_LIMIT = 8
 const canvas = must<HTMLCanvasElement>('#board')
 const levelLabel = must<HTMLElement>('#level-label')
 const moveLabel = must<HTMLElement>('#move-label')
+const remainingLabel = must<HTMLElement>('#remaining-label')
 const levelText = must<HTMLElement>('#level-text')
 const soundButton = must<HTMLButtonElement>('#sound-button')
 const undoButton = must<HTMLButtonElement>('#undo-button')
@@ -99,6 +100,7 @@ function updateHud(): void {
   moveLabel.textContent = `${game.moves} 手`
   undoButton.disabled = game.moves === 0 || locked
   resetButton.disabled = game.moves === 0 || locked
+  updateRemaining()
 }
 
 function step(direction: Direction): void {
@@ -218,6 +220,13 @@ function onFit(fresh: number[]): void {
     vibrate(sound, 18)
   }
   fitCount += fresh.length
+}
+
+/** あと何個で終わりかを出す。残りが見えると入れたくなる */
+function updateRemaining(): void {
+  const remaining = game.level.boxStarts.length - fitBoxes().size
+  remainingLabel.textContent = remaining > 0 ? `あと ${remaining}` : ''
+  remainingLabel.classList.toggle('last-one', remaining === 1)
 }
 
 function onCleared(): void {
