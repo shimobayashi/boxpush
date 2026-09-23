@@ -263,12 +263,15 @@ export class Renderer {
     const level = state.game.level
     const ctx = this.ctx
     ctx.save()
+    ctx.shadowColor = 'rgba(127, 212, 255, 0.8)'
     for (const mark of state.trail) {
       const { x, y } = toXY(level, mark.pos)
-      ctx.globalAlpha = Math.max(0, 0.3 * (1 - mark.age))
+      const fade = 1 - mark.age
+      ctx.globalAlpha = Math.max(0, 0.55 * fade)
+      ctx.shadowBlur = cell * 0.25 * fade
       ctx.fillStyle = '#7fd4ff'
       ctx.beginPath()
-      ctx.arc(x * cell + cell / 2, y * cell + cell / 2, cell * 0.12 * (1 - mark.age), 0, Math.PI * 2)
+      ctx.arc(x * cell + cell / 2, y * cell + cell / 2, cell * 0.2 * fade, 0, Math.PI * 2)
       ctx.fill()
     }
     ctx.restore()
@@ -353,12 +356,29 @@ export class Renderer {
     const cx = x * cell + cell / 2
     const cy = y * cell + cell / 2
 
+    // 動いている間は進む向きに伸ばす。止まっているときは丸いまま
+    let stretchX = 1
+    let stretchY = 1
+    let angle = 0
+    if (state.motion) {
+      const t = state.motion.progress
+      const amount = Math.sin(t * Math.PI) * 0.3
+      const from = toXY(level, state.motion.playerFrom)
+      const to = toXY(level, player)
+      angle = Math.atan2(to.y - from.y, to.x - from.x)
+      stretchX = 1 + amount
+      stretchY = 1 - amount * 0.5
+    }
+
     ctx.save()
-    ctx.shadowColor = 'rgba(255, 255, 255, 0.55)'
-    ctx.shadowBlur = cell * 0.3
+    ctx.shadowColor = 'rgba(255, 255, 255, 0.7)'
+    ctx.shadowBlur = cell * 0.4
     ctx.fillStyle = '#f2f6ff'
+    ctx.translate(cx, cy)
+    ctx.rotate(angle)
+    ctx.scale(stretchX, stretchY)
     ctx.beginPath()
-    ctx.arc(cx, cy, cell * 0.27, 0, Math.PI * 2)
+    ctx.arc(0, 0, cell * 0.27, 0, Math.PI * 2)
     ctx.fill()
     ctx.restore()
   }
