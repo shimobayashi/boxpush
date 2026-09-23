@@ -152,8 +152,8 @@ function step(direction: Direction): void {
     const { cell } = renderer.boardOrigin(game.level.width, game.level.height)
     effects.bump(cell * 0.1)
     sound.blocked()
-    // 壁に当たったまま押し続けても進まない。繰り返しを止めて、当たる音が鳴り続けないようにする
-    input.blockRepeat()
+    // 壁に当たったまま押し続けても進まない。溜まったぶんを捨てて、当たる音が鳴り続けないようにする
+    input.discard()
     return
   }
 
@@ -202,8 +202,8 @@ function step(direction: Direction): void {
   const fitAfter = fitBoxes()
   const fresh = [...fitAfter].filter((box) => !fitBefore.has(box))
   if (fresh.length > 0) {
-    // 入ったところで押しっぱなしを切る。切らないと、そのまま穴の先まで押して詰ませてしまう
-    input.blockRepeat()
+    // 入ったところで入力を切る。切らないと、そのまま穴の先まで押して詰ませてしまう
+    input.release()
     if (game.cleared) {
       // 最後の 1 つだけ溜める。途中の箱まで毎回止めると、続けて解く流れが切れる
       motion.slow = true
@@ -383,12 +383,26 @@ function skipClearDelay(): void {
 }
 
 const input = new Input(canvas, {
-  // クリア演出の間は step が動かさない。飛ばしたいときは指を離して触り直す
-  onStep: step,
   onTouch: () => sound.wake(),
-  // 1 歩を描き切ってから次を受ける。描き終える前に進めると、見えないまま盤面だけ先へ行く
-  canRepeat: () => motion === null,
 })
+
+/**
+ * 溜まった歩を 1 歩ずつ流し込む。
+ *
+ * 1 歩を描き切るまで次は取らない。まとめて動かすと、
+ * 箱が穴に入ったことに気づく前に穴の先まで押してしまう。
+ * 1 歩ごとに結果を見るので、入ったところで残りを捨てて止められる。
+ */
+function pump(): void {
+  if (isBusy()) {
+    // 演出の間に溜まったぶんは捨てる。終わったとたんに歩き出さないため
+    input.release()
+    return
+  }
+  if (motion) return
+  const direction = input.take()
+  if (direction) step(direction)
+}
 
 canvas.addEventListener('pointerdown', skipClearDelay)
 
@@ -497,6 +511,8 @@ function frame(now: number): void {
       if (wasSlow && pendingFit) hitStop = HIT_STOP_SECONDS
     }
   }
+
+  pump()
 
   if (justFitTimer > 0) {
     justFitTimer -= dt
