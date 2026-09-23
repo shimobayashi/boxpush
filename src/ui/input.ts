@@ -49,6 +49,8 @@ export class Input {
   private queue: Direction[] = []
   /** キーは押し直すまで受け付けない */
   private keyHalted = false
+  /** 入力を受け付けるか */
+  private accepting = true
 
   constructor(element: HTMLElement, handlers: InputHandlers) {
     this.element = element
@@ -69,6 +71,19 @@ export class Input {
   /** 溜まっている次の 1 歩。無ければ null */
   take(): Direction | null {
     return this.queue.shift() ?? null
+  }
+
+  /**
+   * 入力を受け付けるかどうかを切り替える。
+   * 受け付けないあいだは何も溜めず、戻したあとも置き直すか押し直すまで動かない。
+   *
+   * 「そのあいだずっと受け付けない」を、溜まりを毎フレーム捨てることで表すと、
+   * 止めたい場面が増えるたびに捨てる呼び出しを 1 つずつ足すことになる。
+   */
+  setAccepting(accepting: boolean): void {
+    if (this.accepting === accepting) return
+    this.accepting = accepting
+    if (!accepting) this.release()
   }
 
   /**
@@ -103,7 +118,7 @@ export class Input {
   }
 
   private onPointerDown = (event: PointerEvent): void => {
-    if (this.pointerId !== null) return
+    if (!this.accepting || this.pointerId !== null) return
     this.pointerId = event.pointerId
     this.anchorX = event.clientX
     this.anchorY = event.clientY
@@ -153,6 +168,7 @@ export class Input {
     const direction = KEYS[event.key.toLowerCase()]
     if (!direction) return
     event.preventDefault()
+    if (!this.accepting) return
 
     if (event.repeat) {
       if (this.keyHalted) return
