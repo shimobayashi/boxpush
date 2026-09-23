@@ -26,9 +26,10 @@
  */
 
 import type { Direction } from '../core/game.ts'
-import { DIRECTIONS } from '../core/game.ts'
+import { DIRECTIONS, delta } from '../core/game.ts'
 import type { Level } from '../core/level.ts'
-import { isGoal, isWall } from '../core/level.ts'
+import { inLine, isGoal } from '../core/level.ts'
+import { NO_ZONE, zoneLabels } from '../core/zone.ts'
 import { findDeadCells } from './solve.ts'
 
 export type Analysis = {
@@ -99,17 +100,13 @@ export function analyze(level: Level, options: AnalyzeOptions = {}): Analysis | 
   }
 }
 
-/** 解けるかどうかだけ知りたいとき */
-export function isSolvable(level: Level): boolean {
-  return shortestPath(level, Infinity) !== null
-}
-
 /** 押し回数がいちばん少ない手順を 1 つ返す。調べた盤面が maxStates を超えたら諦める */
 function shortestPath(level: Level, maxStates: number): Step[] | null {
   // 箱が入ると二度と出せない場所。ここへ押す手はたどらない。
   // これを見ないと調べる盤面が何倍にも膨らむ
   const dead = findDeadCells(level)
-  const start = normalize(level, [...level.boxStarts].sort((a, b) => a - b), level.playerStart)
+  const zones = new Zones(level)
+  const start = zones.normalize([...level.boxStarts].sort((a, b) => a - b), level.playerStart)
   const startKey = keyOf(start)
   const states = new Map<string, State>([[startKey, start]])
   const cameFrom = new Map<string, Step>()
@@ -123,8 +120,7 @@ function shortestPath(level: Level, maxStates: number): Step[] | null {
       if (state.boxes.every((box) => isGoal(level, box))) {
         return rebuild(cameFrom, key)
       }
-      for (const move of pushesFrom(level, state)) {
-        if (dead[move.to] && !isGoal(level, move.to)) continue
+      for (const move of pushesFrom(level, state, dead, zones)) {
         const nextKey = keyOf(move.state)
         if (seen.has(nextKey)) continue
         if (seen.size >= maxStates) return null
@@ -219,9 +215,10 @@ function countDecomposition(level: Level, path: Step[]): number {
 function pushesFrom(
   level: Level,
   state: State,
+  dead: readonly boolean[],
+  zones: Zones,
 ): { state: State; from: number; to: number; direction: Direction }[] {
-  const reachable = walkable(level, state.boxes, state.zone)
-  const boxSet = new Set(state.boxes)
+  const labels = zones.of(state.boxes)
   const result: { state: State; from: number; to: number; direction: Direction }[] = []
 
   for (const box of state.boxes) {
@@ -231,62 +228,52 @@ function pushesFrom(
       const behind = box - step
       if (!inLine(level, box, ahead, step)) continue
       if (!inLine(level, box, behind, step)) continue
-      if (isWall(level, ahead) || boxSet.has(ahead)) continue
-      if (!reachable.has(behind)) continue
+      // 壁も箱も島に属さないので、行き先が空いているかはこれだけで分かる
+      if (labels[ahead] === NO_ZONE) continue
+      // 人が箱の反対側に立てないと押せない
+      if (labels[behind] !== state.zone) continue
+      // 押した先が詰みなら、盤面を作る前に捨てる
+      if (dead[ahead] && !isGoal(level, ahead)) continue
 
       const boxes = state.boxes.filter((b) => b !== box)
       boxes.push(ahead)
       boxes.sort((a, b) => a - b)
       // 押したあと、人は箱がいた場所に立つ
-      result.push({ state: normalize(level, boxes, box), from: box, to: ahead, direction })
+      result.push({ state: zones.normalize(boxes, box), from: box, to: ahead, direction })
     }
   }
 
   return result
 }
 
-/** 人が箱を動かさずに行ける範囲を求め、その中のいちばん小さい位置を代表にする */
-function normalize(level: Level, boxes: number[], player: number): State {
-  return { boxes, zone: Math.min(...walkable(level, boxes, player)) }
-}
+/**
+ * 箱の並びごとの島の表を覚えておく入れもの。
+ *
+ * 同じ箱の並びは別の経路から何度も出てくる。毎回たどり直すと、
+ * 押し手 1 つあたり盤面を何周もすることになる。
+ */
+class Zones {
+  private level: Level
+  private cache = new Map<string, Int32Array>()
 
-function walkable(level: Level, boxes: readonly number[], from: number): Set<number> {
-  const blocked = new Set(boxes)
-  const seen = new Set([from])
-  const queue = [from]
-  while (queue.length > 0) {
-    const pos = queue.pop()!
-    for (const direction of DIRECTIONS) {
-      const step = delta(level, direction)
-      const next = pos + step
-      if (!inLine(level, pos, next, step)) continue
-      if (seen.has(next) || isWall(level, next) || blocked.has(next)) continue
-      seen.add(next)
-      queue.push(next)
-    }
+  constructor(level: Level) {
+    this.level = level
   }
-  return seen
-}
 
-function delta(level: Level, direction: Direction): number {
-  switch (direction) {
-    case 'up':
-      return -level.width
-    case 'down':
-      return level.width
-    case 'left':
-      return -1
-    case 'right':
-      return 1
+  of(boxes: readonly number[]): Int32Array {
+    // 箱は昇順に並べてあるので、この文字列がそのまま並びの名前になる
+    const key = boxes.join(',')
+    const known = this.cache.get(key)
+    if (known) return known
+    const labels = zoneLabels(this.level, boxes)
+    this.cache.set(key, labels)
+    return labels
   }
-}
 
-function inLine(level: Level, from: number, to: number, step: number): boolean {
-  if (to < 0 || to >= level.width * level.height) return false
-  if (step === -1 || step === 1) {
-    return Math.floor(from / level.width) === Math.floor(to / level.width)
+  /** 人の位置を、その人がいる島の代表に置き換えた状態にする */
+  normalize(boxes: number[], player: number): State {
+    return { boxes, zone: this.of(boxes)[player]! }
   }
-  return true
 }
 
 function keyOf(state: State): string {
