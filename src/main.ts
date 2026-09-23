@@ -203,14 +203,20 @@ function step(direction: Direction): void {
  * 面を始めたときや戻したときは、こちらから動かしたわけではないので鳴らさない。
  */
 function updateReaches(notify = true): void {
-  const before = reaches.length
+  // 数だけ見ると、別の箱の予告に入れ替わったときに気づけない
+  const before = new Set(reaches.map((r) => `${r.box}>${r.goal}`))
   reaches = locked || pendingFit ? [] : findReaches(game)
-  if (notify && reaches.length > before) sound.reach()
+  const appeared = reaches.some((r) => !before.has(`${r.box}>${r.goal}`))
+  if (notify && appeared) sound.reach()
 }
 
-/** 残りがあと 1 つになったら、一度だけ知らせる */
+/**
+ * 残りがあと 1 つになったら、一度だけ知らせる。
+ * 箱が最初から 1 つしかない面では、減った実感が無いので鳴らさない。
+ */
 function notifyLastOne(): void {
   if (game.cleared) return
+  if (game.level.boxStarts.length < 2) return
   const remaining = game.level.boxStarts.length - fitBoxes().size
   if (remaining === 1) {
     if (!lastOneNotified) {
