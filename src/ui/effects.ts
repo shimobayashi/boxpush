@@ -18,6 +18,8 @@ export type Particle = {
   spin: number
   angle: number
   gravity: number
+  /** 進む向きに細長く伸ばして描く。飛び散る光の線に使う */
+  streak?: boolean
 }
 
 const FIT_COLORS = ['#ffd166', '#ffe9a8', '#ffffff', '#4dd8ff']
@@ -40,8 +42,9 @@ export class Effects {
   private ripples: Ripple[] = []
   /** 画面をゆする強さ。0 なら揺れない */
   private shake = 0
-  /** 画面全体を白く飛ばす強さ。0 なら何もしない */
+  /** 画面全体を飛ばす強さ。0 なら何もしない */
   private flash = 0
+  private flashTone: 'white' | 'gold' = 'white'
 
   get shakeAmount(): number {
     return this.shake
@@ -74,6 +77,27 @@ export class Effects {
         gravity: 0,
       })
     }
+    // 放射状に伸びる光の線。粒だけより勢いが出る
+    const spokes = Math.round(6 * strength)
+    for (let i = 0; i < spokes; i++) {
+      const angle = (Math.PI * 2 * i) / spokes + Math.random() * 0.4
+      const speed = cell * (4 + Math.random() * 3) * (0.7 + strength * 0.5)
+      this.particles.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 0.22 + Math.random() * 0.12,
+        born: 0.34,
+        size: cell * 0.045 * (0.8 + strength * 0.2),
+        color: '#fff3d0',
+        spin: 0,
+        angle: 0,
+        gravity: 0,
+        streak: true,
+      })
+    }
+
     this.ripples.push({
       x,
       y,
@@ -87,9 +111,57 @@ export class Effects {
     this.shake = Math.max(this.shake, cell * 0.12 * strength)
   }
 
-  /** 画面全体を白く飛ばす。最後の 1 つが入った瞬間に使う */
-  whiteOut(strength = 1): void {
-    this.flash = Math.max(this.flash, strength)
+  /** 箱を押したときに、箱の後ろから散る細かい粒 */
+  scrape(x: number, y: number, cell: number, dx: number, dy: number): void {
+    for (let i = 0; i < 5; i++) {
+      // 押した向きと逆に、少しばらけて飛ばす
+      const spread = (Math.random() - 0.5) * 1.4
+      const angle = Math.atan2(-dy, -dx) + spread
+      const speed = cell * (0.8 + Math.random() * 1.6)
+      this.particles.push({
+        x: x - dx * cell * 0.3,
+        y: y - dy * cell * 0.3,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 0.16 + Math.random() * 0.12,
+        born: 0.28,
+        size: cell * (0.025 + Math.random() * 0.025),
+        color: '#7fd4ff',
+        spin: 0,
+        angle: 0,
+        gravity: 0,
+      })
+    }
+  }
+
+  /** 人が歩いた足元から、小さな輪を広げる */
+  footprint(x: number, y: number, cell: number): void {
+    this.ripples.push({
+      x,
+      y,
+      radius: cell * 0.16,
+      speed: cell * 2.4,
+      life: 0.3,
+      born: 0.3,
+      color: '127, 212, 255',
+      width: Math.max(1, cell * 0.02),
+    })
+  }
+
+  /** 揺らすだけ。壁にぶつかったときなど */
+  bump(amount: number): void {
+    this.shake = Math.max(this.shake, amount)
+  }
+
+  /**
+   * 画面全体を飛ばす。
+   * 箱が入るたびの軽い金色と、最後の 1 つが決まったときの白を使い分ける。
+   */
+  whiteOut(strength = 1, tone: 'white' | 'gold' = 'white'): void {
+    if (strength > this.flash) {
+      this.flash = strength
+      this.flashTone = tone
+    }
   }
 
   /** 面クリア。上から紙吹雪が降る */
@@ -156,7 +228,13 @@ export class Effects {
       ctx.globalAlpha = alpha
       ctx.fillStyle = p.color
       ctx.translate(p.x, p.y)
-      if (p.spin === 0) {
+      if (p.streak) {
+        // 速さに比例して伸ばす。止まりかけると点に近づく
+        const speed = Math.hypot(p.vx, p.vy)
+        const length = Math.max(p.size * 2, speed * 0.035)
+        ctx.rotate(Math.atan2(p.vy, p.vx))
+        ctx.fillRect(-length, -p.size / 2, length * 2, p.size)
+      } else if (p.spin === 0) {
         ctx.beginPath()
         ctx.arc(0, 0, p.size, 0, Math.PI * 2)
         ctx.fill()
@@ -168,12 +246,12 @@ export class Effects {
     }
   }
 
-  /** 画面全体を白く覆う。盤面を描いたあとに重ねて呼ぶ */
+  /** 画面全体を覆う。盤面を描いたあとに重ねて呼ぶ */
   drawFlash(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     if (this.flash <= 0) return
     ctx.save()
     ctx.globalAlpha = Math.min(0.85, this.flash * 0.85)
-    ctx.fillStyle = '#ffffff'
+    ctx.fillStyle = this.flashTone === 'gold' ? '#ffd98a' : '#ffffff'
     ctx.fillRect(0, 0, width, height)
     ctx.restore()
   }

@@ -112,6 +112,9 @@ function step(direction: Direction): void {
   const fitBefore = fitBoxes()
 
   if (!game.move(direction)) {
+    // 進めなかったことを音だけでなく画面でも返す
+    const { cell } = renderer.boardOrigin(game.level.width, game.level.height)
+    effects.bump(cell * 0.1)
     sound.blocked()
     return
   }
@@ -132,8 +135,31 @@ function step(direction: Direction): void {
   trail.unshift({ pos: playerBefore, age: 0 })
   if (trail.length > TRAIL_LIMIT) trail.length = TRAIL_LIMIT
 
-  if (pushedBox !== null) sound.push()
-  else sound.step()
+  const board = renderer.boardOrigin(game.level.width, game.level.height)
+  const footAt = toXY(game.level, playerBefore)
+  effects.footprint(
+    board.x + footAt.x * board.cell + board.cell / 2,
+    board.y + footAt.y * board.cell + board.cell / 2,
+    board.cell,
+  )
+
+  if (pushedBox !== null) {
+    // 押した箱の後ろから粒が散る。押している手応えを目でも返す
+    const at = toXY(game.level, pushedBox)
+    const step = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[direction]
+    effects.scrape(
+      board.x + at.x * board.cell + board.cell / 2,
+      board.y + at.y * board.cell + board.cell / 2,
+      board.cell,
+      step[0]!,
+      step[1]!,
+    )
+    effects.bump(board.cell * 0.04)
+    sound.push()
+    vibrate(sound, 8)
+  } else {
+    sound.step()
+  }
 
   const fitAfter = fitBoxes()
   const fresh = [...fitAfter].filter((box) => !fitBefore.has(box))
@@ -201,9 +227,10 @@ function onFit(fresh: number[]): void {
   justFit = new Set(fresh)
   justFitTimer = JUST_FIT_SECONDS
 
-  // 最後の 1 つが決まった瞬間だけ、けた違いに派手にする
+  // 入れるたびに派手さを積み増す。1 つ目より 2 つ目、2 つ目より 3 つ目が強い。
+  // 最後の 1 つが決まった瞬間だけ、けた違いにする
   const final = game.cleared
-  const strength = final ? 4 : 1
+  const strength = final ? 4.5 : 1.8 + fitCount * 0.6
 
   const { cell, x, y } = renderer.boardOrigin(level.width, level.height)
   for (const box of fresh) {
@@ -216,8 +243,10 @@ function onFit(fresh: number[]): void {
     sound.finalFit()
     vibrate(sound, [0, 60])
   } else {
+    // 金色に軽く飛ばす。入れた数が増えるほど強くする
+    effects.whiteOut(Math.min(0.45, 0.2 + fitCount * 0.1), 'gold')
     sound.fit(fitCount)
-    vibrate(sound, 18)
+    vibrate(sound, 22 + fitCount * 8)
   }
   fitCount += fresh.length
 }
