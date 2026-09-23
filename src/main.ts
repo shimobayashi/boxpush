@@ -182,10 +182,14 @@ function step(direction: Direction): void {
   const fitAfter = fitBoxes()
   const fresh = [...fitAfter].filter((box) => !fitBefore.has(box))
   if (fresh.length > 0) {
-    // ここでは演出を出さない。箱が吸い込まれ切るのを待ってから出す
-    motion.slow = true
-    pendingFit = fresh
-    sound.suck()
+    if (game.cleared) {
+      // 最後の 1 つだけ溜める。途中の箱まで毎回止めると、続けて解く流れが切れる
+      motion.slow = true
+      pendingFit = fresh
+      sound.suck()
+    } else {
+      onFit(fresh)
+    }
   } else if (fitAfter.size < fitBefore.size) {
     justFit = new Set()
     fitCount = Math.max(0, fitCount - 1)
