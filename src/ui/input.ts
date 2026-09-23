@@ -109,14 +109,6 @@ export class Input {
     this.pointerId = null
   }
 
-  destroy(): void {
-    this.element.removeEventListener('pointerdown', this.onPointerDown)
-    this.element.removeEventListener('pointermove', this.onPointerMove)
-    this.element.removeEventListener('pointerup', this.onPointerUp)
-    this.element.removeEventListener('pointercancel', this.onPointerUp)
-    window.removeEventListener('keydown', this.onKeyDown)
-  }
-
   private onPointerDown = (event: PointerEvent): void => {
     if (!this.accepting || this.pointerId !== null) return
     this.pointerId = event.pointerId
