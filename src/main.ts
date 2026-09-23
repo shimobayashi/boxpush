@@ -8,6 +8,8 @@ import levelsText from '../levels.txt?raw'
 import type { Direction } from './core/game.ts'
 import { Game } from './core/game.ts'
 import { isGoal, parseLevels, toXY } from './core/level.ts'
+import type { Reach } from './core/reach.ts'
+import { findReaches } from './core/reach.ts'
 import { Sound, vibrate } from './ui/audio.ts'
 import { Effects } from './ui/effects.ts'
 import { Input } from './ui/input.ts'
@@ -29,6 +31,10 @@ const JUST_FIT_SECONDS = 0.4
 const TRAIL_SECONDS = 0.5
 /** 跡として残す最大の数 */
 const TRAIL_LIMIT = 8
+/** 箱が穴に入る一手だけ、移動をこの倍だけ長くかけて吸い込まれるように見せる */
+const FIT_SLOWDOWN = 3.5
+/** 吸い込まれ切った瞬間に、これだけ画面を止めてから爆発させる */
+const HIT_STOP_SECONDS = 0.09
 
 const canvas = must<HTMLCanvasElement>('#board')
 const levelLabel = must<HTMLElement>('#level-label')
@@ -62,6 +68,12 @@ let trail: { pos: number; age: number }[] = []
 let lastOneNotified = false
 /** やり直さずに何面続けてクリアしたか */
 let streak = 0
+/** 箱が吸い込まれ切るのを待っている間、演出をここに置いておく */
+let pendingFit: number[] | null = null
+/** 演出を出す前の、画面を止めておく残り秒数 */
+let hitStop = 0
+/** あと 1 手で入る箱と穴。予告に使う */
+let reaches: Reach[] = []
 /** クリア時に手数を数え上げて見せるための、今表示している値 */
 let countedMoves = 0
 
@@ -84,6 +96,9 @@ function startLevel(index: number): void {
   trail = []
   lastOneNotified = false
   countedMoves = 0
+  pendingFit = null
+  hitStop = 0
+  reaches = []
   // 紙吹雪はここで消さない。次の面が始まってからも降り続ける方が続けて遊んでいる感じが出る
 
   progress = { ...progress, current: index }
@@ -93,6 +108,7 @@ function startLevel(index: number): void {
   levelText.textContent = level.text
   input.release()
   input.setCellSize(renderer.cellSize(level.width, level.height))
+  updateReaches(false)
   updateHud()
 }
 
@@ -130,7 +146,7 @@ function step(direction: Direction): void {
     from.set(box, findMovedFrom(box, before, direction))
     pushedBox = box
   }
-  motion = { progress: 0, from, playerFrom: playerBefore, pushedBox }
+  motion = { progress: 0, from, playerFrom: playerBefore, pushedBox, slow: false }
 
   trail.unshift({ pos: playerBefore, age: 0 })
   if (trail.length > TRAIL_LIMIT) trail.length = TRAIL_LIMIT
@@ -164,19 +180,30 @@ function step(direction: Direction): void {
   const fitAfter = fitBoxes()
   const fresh = [...fitAfter].filter((box) => !fitBefore.has(box))
   if (fresh.length > 0) {
-    onFit(fresh)
+    // ここでは演出を出さない。箱が吸い込まれ切るのを待ってから出す
+    motion.slow = true
+    pendingFit = fresh
+    sound.suck()
   } else if (fitAfter.size < fitBefore.size) {
     justFit = new Set()
     fitCount = Math.max(0, fitCount - 1)
     sound.unfit()
   }
 
+  updateReaches()
   notifyLastOne()
   updateHud()
+}
 
-  if (game.cleared) {
-    onCleared()
-  }
+/**
+ * 予告を出し直す。
+ * notify が true なら、新しく立ったときに音で知らせる。
+ * 面を始めたときや戻したときは、こちらから動かしたわけではないので鳴らさない。
+ */
+function updateReaches(notify = true): void {
+  const before = reaches.length
+  reaches = locked || pendingFit ? [] : findReaches(game)
+  if (notify && reaches.length > before) sound.reach()
 }
 
 /** 残りがあと 1 つになったら、一度だけ知らせる */
@@ -335,6 +362,7 @@ undoButton.addEventListener('click', () => {
   motion = null
   justFit = new Set()
   fitCount = fitBoxes().size
+  updateReaches(false)
   updateHud()
 })
 
@@ -349,6 +377,7 @@ resetButton.addEventListener('click', () => {
   // やり直したら連続クリアは途切れる。背景の熱も冷める
   streak = 0
   effects.clear()
+  updateReaches(false)
   updateHud()
 })
 
@@ -384,9 +413,33 @@ function frame(now: number): void {
   const dt = Math.min(0.05, (now - lastTime) / 1000)
   lastTime = now
 
+  // 吸い込まれ切ったあとの静止。ここでは何も進めない
+  if (hitStop > 0) {
+    hitStop -= dt
+    if (hitStop <= 0) {
+      hitStop = 0
+      const fresh = pendingFit
+      pendingFit = null
+      if (fresh) {
+        onFit(fresh)
+        updateReaches()
+        notifyLastOne()
+        if (game.cleared) onCleared()
+      }
+    }
+    draw(0)
+    requestAnimationFrame(frame)
+    return
+  }
+
   if (motion) {
-    motion.progress += dt / STEP_SECONDS
-    if (motion.progress >= 1) motion = null
+    motion.progress += dt / (STEP_SECONDS * (motion.slow ? FIT_SLOWDOWN : 1))
+    if (motion.progress >= 1) {
+      const wasSlow = motion.slow
+      motion = null
+      // 吸い込み切った瞬間に一拍おいてから爆発させる
+      if (wasSlow && pendingFit) hitStop = HIT_STOP_SECONDS
+    }
   }
 
   if (justFitTimer > 0) {
@@ -413,8 +466,12 @@ function frame(now: number): void {
     }
   }
 
-  effects.update(dt)
+  draw(dt)
+  requestAnimationFrame(frame)
+}
 
+function draw(dt: number): void {
+  effects.update(dt)
   renderer.draw(
     {
       game,
@@ -424,12 +481,11 @@ function frame(now: number): void {
       lastOne: isLastOne(),
       trail,
       streak,
+      reaches,
     },
     effects,
     dt,
   )
-
-  requestAnimationFrame(frame)
 }
 
 function handleResize(): void {
