@@ -210,8 +210,11 @@ export class Effects {
   /**
    * 面クリア。下の両隅から打ち上げて、そのあと上からも降らせる。
    * 上から降らせるだけだと一方向で単調に見えるため。
+   *
+   * life は、この紙が消えるまでのおおよその秒数。
+   * 呼ぶ側が「次の面に入ってから少しだけ残る」長さを渡す。
    */
-  confetti(width: number, height: number, cell: number): void {
+  confetti(width: number, height: number, cell: number, life: number): void {
     // 左右の下隅から斜め上へ打ち上げる
     for (const side of [0, 1]) {
       const originX = side === 0 ? 0 : width
@@ -225,8 +228,8 @@ export class Effects {
           y: height,
           vx: Math.cos(spread) * speed * aim,
           vy: -Math.sin(spread) * speed - cell * 4,
-          life: 1.6 + Math.random() * 0.9,
-          born: 2.5,
+          life: life + Math.random() * 0.45,
+          born: life + 0.45,
           size: cell * (0.1 + Math.random() * 0.11),
           color: CLEAR_COLORS[i % CLEAR_COLORS.length]!,
           spin: (Math.random() - 0.5) * 16,
@@ -236,12 +239,15 @@ export class Effects {
         })
       }
     }
-    this.rain(width, height, cell, 90)
+    this.rain(width, height, cell, 90, life)
     this.shake = Math.max(this.shake, cell * 0.3)
   }
 
-  /** 上から紙が舞い落ちる。クリア演出の間、何度かに分けて呼ぶ */
-  rain(width: number, height: number, cell: number, count: number): void {
+  /**
+   * 上から紙が舞い落ちる。クリア演出の間、何度かに分けて呼ぶ。
+   * life は消えるまでのおおよその秒数。
+   */
+  rain(width: number, height: number, cell: number, count: number, life: number): void {
     for (let i = 0; i < count; i++) {
       this.particles.push({
         x: Math.random() * width,
@@ -249,8 +255,8 @@ export class Effects {
         vx: (Math.random() - 0.5) * cell * 2,
         // 落ちる速さに幅を持たせて、速いものとゆっくり舞うものを混ぜる
         vy: cell * (1.2 + Math.random() * 3.4),
-        life: 1.6 + Math.random() * 1.1,
-        born: 2.7,
+        life: life + Math.random() * 0.45,
+        born: life + 0.45,
         size: cell * (0.1 + Math.random() * 0.1),
         color: CLEAR_COLORS[i % CLEAR_COLORS.length]!,
         spin: (Math.random() - 0.5) * 14,
@@ -327,20 +333,6 @@ export class Effects {
         ctx.fillRect(-p.size, -p.size * 0.6, p.size * 2, p.size * 1.2)
       }
       ctx.restore()
-    }
-  }
-
-  /**
-   * 残っている粒の寿命を、長くてもこの秒数までに詰める。
-   * 次の面に移ったときに呼ぶ。少しだけ残って見えるのは良いが、
-   * 降り続けると盤面が読み取りにくくなるため。
-   */
-  cutShort(seconds: number): void {
-    for (const p of this.particles) {
-      if (p.life <= seconds) continue
-      p.life = seconds
-      // 薄さは life / born で決まる。born を詰めないと、切った瞬間に急に薄くなる
-      p.born = seconds
     }
   }
 

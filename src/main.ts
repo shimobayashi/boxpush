@@ -37,8 +37,13 @@ const FIT_SLOWDOWN = 7
 const HIT_STOP_SECONDS = 0.18
 /** クリア演出の残り秒数がこの値を切ったときに、紙吹雪を追加で降らせる */
 const CONFETTI_WAVES = [1.15, 0.85, 0.5]
-/** 次の面に移ったあと、残った紙吹雪が消えるまでの秒数 */
-const CONFETTI_TAIL_SECONDS = 0.45
+/**
+ * 紙吹雪が、次の面に移ってからも残る秒数。
+ * 少しだけ残っている方が続けて遊んでいる感じが出るが、
+ * 降り続けると盤面が読み取りにくくなる。
+ * 撒いた時点の残り時間にこれを足したぶんを、その紙の寿命にする。
+ */
+const CONFETTI_TAIL_SECONDS = 0.25
 
 const canvas = must<HTMLCanvasElement>('#board')
 const levelLabel = must<HTMLElement>('#level-label')
@@ -105,9 +110,7 @@ function startLevel(index: number): void {
   pendingFit = null
   hitStop = 0
   reaches = []
-  // 紙吹雪はここで消さない。次の面に少し残っている方が続けて遊んでいる感じが出る。
-  // ただし降り続けると盤面が読み取りにくいので、短く畳む
-  effects.cutShort(CONFETTI_TAIL_SECONDS)
+  // 紙吹雪はここで消さない。撒いた時点で寿命を決めてあるので、少し残ってから自然に消える
 
   progress = { ...progress, current: index }
   saveProgress(progress)
@@ -318,7 +321,8 @@ function onCleared(): void {
 
   const level = game.level
   const { cell } = renderer.boardOrigin(level.width, level.height)
-  effects.confetti(canvas.clientWidth, canvas.clientHeight, cell)
+  // 次の面に移るまでの時間に、少しだけ残るぶんを足したのがこの紙の寿命
+  effects.confetti(canvas.clientWidth, canvas.clientHeight, cell, CLEAR_SECONDS + CONFETTI_TAIL_SECONDS)
   effects.whiteOut(0.6, 'gold')
   sound.clear()
   vibrate(sound, [0, 40, 60, 80])
@@ -517,7 +521,8 @@ function frame(now: number): void {
     for (const at of CONFETTI_WAVES) {
       if (before > at && clearTimer <= at) {
         const { cell } = renderer.boardOrigin(game.level.width, game.level.height)
-        effects.rain(canvas.clientWidth, canvas.clientHeight, cell, 70)
+        // 遅く撒いた紙ほど短命にして、どの波も次の面で同じころに消え切るようにする
+        effects.rain(canvas.clientWidth, canvas.clientHeight, cell, 70, at + CONFETTI_TAIL_SECONDS)
       }
     }
 
