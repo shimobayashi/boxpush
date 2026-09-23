@@ -17,6 +17,12 @@ export type InputHandlers = {
   onStep: (direction: Direction) => void
   /** 指が触れた。音を起こすのに使う */
   onTouch: () => void
+  /**
+   * キーを押しっぱなしにしたときの繰り返しを、今受け付けてよいか。
+   * 繰り返す間隔は OS が決めるので、1 歩を描き切る速さより速いことがある。
+   * 描き切るのを待たずに進めると、手元より先に盤面が進んで行きすぎる。
+   */
+  canRepeat: () => boolean
 }
 
 export class Input {
@@ -27,6 +33,8 @@ export class Input {
   /** 前に 1 歩進んだ地点。ここからの距離で次の 1 歩を決める */
   private anchorX = 0
   private anchorY = 0
+  /** 押しっぱなしの繰り返しを、キーを押し直すまで止めるか */
+  private repeatBlocked = false
 
   constructor(element: HTMLElement, handlers: InputHandlers) {
     this.element = element
@@ -37,6 +45,7 @@ export class Input {
     element.addEventListener('pointerup', this.onPointerUp)
     element.addEventListener('pointercancel', this.onPointerUp)
     window.addEventListener('keydown', this.onKeyDown)
+    window.addEventListener('keyup', this.onKeyUp)
   }
 
   /** 盤面のマスの大きさが変わったら教える。1 歩ぶんの距離がこれで決まる */
@@ -50,6 +59,16 @@ export class Input {
    */
   release(): void {
     this.pointerId = null
+    this.repeatBlocked = true
+  }
+
+  /**
+   * 押しっぱなしの繰り返しを、キーを押し直すまで止める。
+   * 箱が穴に入ったときと、押せなかったときに呼ぶ。
+   * 入った箱をそのまま穴の先へ押し出して詰ませる事故を防ぐ。
+   */
+  blockRepeat(): void {
+    this.repeatBlocked = true
   }
 
   destroy(): void {
@@ -58,6 +77,7 @@ export class Input {
     this.element.removeEventListener('pointerup', this.onPointerUp)
     this.element.removeEventListener('pointercancel', this.onPointerUp)
     window.removeEventListener('keydown', this.onKeyDown)
+    window.removeEventListener('keyup', this.onKeyUp)
   }
 
   private onPointerDown = (event: PointerEvent): void => {
@@ -105,8 +125,18 @@ export class Input {
     const direction = KEYS[event.key.toLowerCase()]
     if (!direction) return
     event.preventDefault()
+    if (event.repeat) {
+      if (this.repeatBlocked || !this.handlers.canRepeat()) return
+    } else {
+      this.repeatBlocked = false
+    }
     this.handlers.onTouch()
     this.handlers.onStep(direction)
+  }
+
+  private onKeyUp = (event: KeyboardEvent): void => {
+    if (!KEYS[event.key.toLowerCase()]) return
+    this.repeatBlocked = false
   }
 }
 
