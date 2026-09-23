@@ -17,13 +17,16 @@
 
 ```sh
 npm install
-npm run dev     # 開発中の表示
-npm test        # 盤面と面データの検査
-npm run build   # 公開する形に固める
-npm run gen     # 面を作り直して levels.txt を書き出す
+npm run dev       # 開発中の表示
+npm test          # 盤面と面データの検査
+npm run test:e2e  # ブラウザで実際に遊んで、操作の受け付けを検査
+npm run build     # 公開する形に固める
+npm run gen       # 面を作り直して levels.txt を書き出す
 ```
 
-main に push すると GitHub Actions がテストを回し、通れば GitHub Pages に公開する。
+`test:e2e` は初回だけ `npx playwright install chromium` が要る。
+
+main に push すると GitHub Actions が両方の検査を回し、通れば GitHub Pages に公開する。
 
 ## 面を足す
 
@@ -43,6 +46,7 @@ main に push すると GitHub Actions がテストを回し、通れば GitHub 
 空行で面を区切る。
 
 足したら `npm test` を通す。解けること、難易度が目標どおりであることを検査している。
+面 01・02・04 の形は `e2e/play.spec.ts` が前提にしているので、作り直したらそちらも見る。
 
 仕様と、そう決めた理由は [docs/design.md](docs/design.md) にある。
 面の作り方と難しさの測り方は [docs/levels.md](docs/levels.md)、演出は [docs/effects.md](docs/effects.md)。

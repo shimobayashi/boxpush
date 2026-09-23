@@ -27,6 +27,10 @@ jobs:
       - run: npm ci
       # 面が解けない、押し回数が目標とずれている、といった状態を公開しない
       - run: npm test
+      # 盤面は正しいのに操作の受け付けが壊れている、という状態を公開しない。
+      # この層の不具合は上の検査を全部通り抜けるので、実際に遊んで確かめる
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
