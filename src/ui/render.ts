@@ -4,6 +4,7 @@
  */
 
 import type { Game } from '../core/game.ts'
+import type { Level } from '../core/level.ts'
 import { isGoal, isWall, toXY } from '../core/level.ts'
 import type { Effects } from './effects.ts'
 
@@ -20,6 +21,8 @@ export type Motion = {
   /** 位置ごとの、直前の位置。補間の起点 */
   from: Map<number, number>
   playerFrom: number
+  /** いま押されている箱。潰れて戻る動きを付ける */
+  pushedBox: number | null
 }
 
 export type RenderState = {
@@ -27,8 +30,14 @@ export type RenderState = {
   motion: Motion | null
   /** 穴に入ったばかりの箱。光らせる */
   justFit: Set<number>
-  /** クリア演出の進み具合。0 なら演出していない */
+  /** クリア演出の進み具合（秒）。0 なら演出していない */
   clearProgress: number
+  /** 残りの箱があと 1 つか。盤面を張り詰めた見た目にする */
+  lastOne: boolean
+  /** 人が通ってきた跡。新しいものほど後ろ */
+  trail: readonly { pos: number; age: number }[]
+  /** 何面続けてクリアしているか。背景の濃さに使う */
+  streak: number
 }
 
 export class Renderer {
@@ -36,6 +45,8 @@ export class Renderer {
   private canvas: HTMLCanvasElement
   private width = 0
   private height = 0
+  /** 背景の脈動や穴の明滅に使う、起動からの経過秒 */
+  private clock = 0
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas
@@ -64,7 +75,8 @@ export class Renderer {
     return Math.floor(Math.min(this.width / columns, this.height / rows))
   }
 
-  draw(state: RenderState, effects: Effects): void {
+  draw(state: RenderState, effects: Effects, dt: number): void {
+    this.clock += dt
     const { game } = state
     const level = game.level
     const ctx = this.ctx
@@ -77,6 +89,8 @@ export class Renderer {
     const boardHeight = cell * level.height
     const originX = (this.width - boardWidth) / 2
     const originY = (this.height - boardHeight) / 2
+
+    this.drawBackground(state, cell)
 
     ctx.save()
     const shake = effects.shakeAmount
@@ -93,8 +107,9 @@ export class Renderer {
       ctx.translate(-boardWidth / 2, -boardHeight / 2)
     }
 
-    this.drawFloorAndWalls(level, cell)
-    this.drawGoals(level, cell)
+    this.drawFloorAndWalls(level, cell, state.clearProgress)
+    this.drawGoals(state, cell)
+    this.drawTrail(state, cell)
     this.drawBoxes(state, cell)
     this.drawPlayer(state, cell)
 
@@ -102,6 +117,7 @@ export class Renderer {
 
     // 粒は盤面の外にも飛ぶので、揺れも盤面のずらしも掛けずに描く
     effects.draw(ctx)
+    effects.drawFlash(ctx, this.width, this.height)
   }
 
   /** 盤面の左上を原点にした座標を、画面の座標に直す */
@@ -114,8 +130,74 @@ export class Renderer {
     }
   }
 
-  private drawFloorAndWalls(level: RenderState['game']['level'], cell: number): void {
+  /**
+   * 盤面の外側。連続でクリアしているほど色が濃くなり、格子がゆっくり脈打つ。
+   * 画面の半分以上が余白なので、ここが暗いままだと盤面だけが浮いて見える。
+   */
+  private drawBackground(state: RenderState, cell: number): void {
     const ctx = this.ctx
+    const pulse = 0.5 + 0.5 * Math.sin(this.clock * 1.4)
+    // 5 面続けて抜けると濃さが頭打ちになる
+    const heat = Math.min(1, state.streak / 5)
+
+    if (heat > 0) {
+      const glow = ctx.createRadialGradient(
+        this.width / 2,
+        this.height / 2,
+        0,
+        this.width / 2,
+        this.height / 2,
+        Math.max(this.width, this.height) * 0.75,
+      )
+      glow.addColorStop(0, `rgba(40, 120, 190, ${0.1 * heat + 0.03 * heat * pulse})`)
+      glow.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      ctx.fillStyle = glow
+      ctx.fillRect(0, 0, this.width, this.height)
+    }
+
+    if (state.lastOne) {
+      // 残り 1 つのあいだは赤みを差して、張り詰めた感じにする
+      const glow = ctx.createRadialGradient(
+        this.width / 2,
+        this.height / 2,
+        Math.min(this.width, this.height) * 0.3,
+        this.width / 2,
+        this.height / 2,
+        Math.max(this.width, this.height) * 0.8,
+      )
+      glow.addColorStop(0, 'rgba(0, 0, 0, 0)')
+      glow.addColorStop(1, `rgba(190, 70, 60, ${0.12 + 0.08 * pulse})`)
+      ctx.fillStyle = glow
+      ctx.fillRect(0, 0, this.width, this.height)
+    }
+
+    ctx.save()
+    ctx.strokeStyle = `rgba(120, 160, 220, ${0.035 + 0.025 * pulse + 0.03 * heat})`
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    for (let x = (this.width / 2) % cell; x < this.width; x += cell) {
+      ctx.moveTo(Math.round(x) + 0.5, 0)
+      ctx.lineTo(Math.round(x) + 0.5, this.height)
+    }
+    for (let y = (this.height / 2) % cell; y < this.height; y += cell) {
+      ctx.moveTo(0, Math.round(y) + 0.5)
+      ctx.lineTo(this.width, Math.round(y) + 0.5)
+    }
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  /**
+   * 床と壁。
+   * クリアの瞬間だけ、中心から外へ波が走るようにマスを光らせる。
+   */
+  private drawFloorAndWalls(level: Level, cell: number, clearProgress: number): void {
+    const ctx = this.ctx
+    const centerX = (level.width - 1) / 2
+    const centerY = (level.height - 1) / 2
+    // 波が盤面の端に届くまでの速さ。1.5 秒の演出のうち前半で走り切る
+    const waveFront = clearProgress * 9
+
     for (let y = 0; y < level.height; y++) {
       for (let x = 0; x < level.width; x++) {
         const pos = y * level.width + x
@@ -131,23 +213,62 @@ export class Renderer {
           ctx.fillStyle = COLORS.floor
           ctx.fillRect(px, py, cell, cell)
         }
+
+        if (clearProgress > 0) {
+          const distance = Math.hypot(x - centerX, y - centerY)
+          const edge = waveFront - distance
+          // 波の先端から少し後ろまでが光る
+          if (edge > 0 && edge < 1.6) {
+            ctx.save()
+            ctx.globalAlpha = Math.sin((edge / 1.6) * Math.PI) * 0.7
+            ctx.fillStyle = '#ffd166'
+            ctx.fillRect(px, py, cell, cell)
+            ctx.restore()
+          }
+        }
       }
     }
   }
 
-  private drawGoals(level: RenderState['game']['level'], cell: number): void {
+  private drawGoals(state: RenderState, cell: number): void {
+    const level = state.game.level
     const ctx = this.ctx
+    // 残り 1 つのときだけ、空いている穴を脈打たせて目を引く
+    const pulse = state.lastOne ? 0.5 + 0.5 * Math.sin(this.clock * 6) : 0
+
     ctx.save()
-    ctx.strokeStyle = 'rgba(255, 209, 102, 0.75)'
-    ctx.lineWidth = Math.max(2, cell * 0.06)
-    ctx.shadowColor = 'rgba(255, 209, 102, 0.5)'
-    ctx.shadowBlur = cell * 0.25
     for (let pos = 0; pos < level.width * level.height; pos++) {
       if (!isGoal(level, pos)) continue
+      const filled = state.game.hasBox(pos)
       const { x, y } = toXY(level, pos)
+      const radius = cell * (0.24 + (filled ? 0 : pulse * 0.05))
+
+      ctx.strokeStyle = filled
+        ? 'rgba(255, 209, 102, 0.35)'
+        : `rgba(255, 209, 102, ${0.75 + pulse * 0.25})`
+      ctx.lineWidth = Math.max(2, cell * (0.06 + (filled ? 0 : pulse * 0.02)))
+      ctx.shadowColor = 'rgba(255, 209, 102, 0.5)'
+      ctx.shadowBlur = cell * (0.25 + pulse * 0.35)
       ctx.beginPath()
-      ctx.arc(x * cell + cell / 2, y * cell + cell / 2, cell * 0.24, 0, Math.PI * 2)
+      ctx.arc(x * cell + cell / 2, y * cell + cell / 2, radius, 0, Math.PI * 2)
       ctx.stroke()
+    }
+    ctx.restore()
+  }
+
+  /** 人が通ってきた跡。どう動いたかが目で追えるようにする */
+  private drawTrail(state: RenderState, cell: number): void {
+    if (state.trail.length === 0) return
+    const level = state.game.level
+    const ctx = this.ctx
+    ctx.save()
+    for (const mark of state.trail) {
+      const { x, y } = toXY(level, mark.pos)
+      ctx.globalAlpha = Math.max(0, 0.3 * (1 - mark.age))
+      ctx.fillStyle = '#7fd4ff'
+      ctx.beginPath()
+      ctx.arc(x * cell + cell / 2, y * cell + cell / 2, cell * 0.12 * (1 - mark.age), 0, Math.PI * 2)
+      ctx.fill()
     }
     ctx.restore()
   }
@@ -161,9 +282,23 @@ export class Renderer {
       const fresh = state.justFit.has(box)
 
       const pad = cell * 0.11
-      const px = x * cell + pad
-      const py = y * cell + pad
       const size = cell - pad * 2
+      const centerX = x * cell + cell / 2
+      const centerY = y * cell + cell / 2
+
+      // 押されている間だけ、進む向きに潰れて戻る
+      let scaleX = 1
+      let scaleY = 1
+      if (state.motion && state.motion.pushedBox === box) {
+        const t = state.motion.progress
+        const squash = Math.sin(t * Math.PI) * 0.18
+        const from = state.motion.from.get(box)
+        if (from !== undefined) {
+          const horizontal = Math.abs(box - from) === 1
+          scaleX = horizontal ? 1 - squash : 1 + squash * 0.6
+          scaleY = horizontal ? 1 + squash * 0.6 : 1 - squash
+        }
+      }
 
       ctx.save()
       if (fresh) {
@@ -178,7 +313,10 @@ export class Renderer {
         ctx.shadowBlur = cell * 0.28
       }
 
-      const gradient = ctx.createLinearGradient(px, py, px, py + size)
+      ctx.translate(centerX, centerY)
+      ctx.scale(scaleX, scaleY)
+
+      const gradient = ctx.createLinearGradient(0, -size / 2, 0, size / 2)
       if (onGoal) {
         gradient.addColorStop(0, '#ffe3a0')
         gradient.addColorStop(1, '#f0a93c')
@@ -187,7 +325,7 @@ export class Renderer {
         gradient.addColorStop(1, '#2a9fd6')
       }
       ctx.fillStyle = gradient
-      roundedRect(ctx, px, py, size, size, cell * 0.16)
+      roundedRect(ctx, -size / 2, -size / 2, size, size, cell * 0.16)
       ctx.fill()
       ctx.restore()
     }

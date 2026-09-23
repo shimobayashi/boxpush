@@ -22,9 +22,13 @@ const levels = parseLevels(levelsText)
 /** 1 歩の移動を描き切るまでの秒数。速すぎると何が起きたか分からず、遅いとテンポが落ちる */
 const STEP_SECONDS = 0.085
 /** クリア演出を見せてから次の面へ移るまでの秒数 */
-const CLEAR_SECONDS = 0.8
+const CLEAR_SECONDS = 1.5
 /** 入ったばかりの箱を強く光らせておく秒数 */
 const JUST_FIT_SECONDS = 0.4
+/** 人が通った跡が消えるまでの秒数 */
+const TRAIL_SECONDS = 0.5
+/** 跡として残す最大の数 */
+const TRAIL_LIMIT = 8
 
 const canvas = must<HTMLCanvasElement>('#board')
 const levelLabel = must<HTMLElement>('#level-label')
@@ -51,6 +55,14 @@ let clearTimer = 0
 let fitCount = 0
 /** クリア演出の間は操作を受け付けない */
 let locked = false
+/** 人が通ってきた跡 */
+let trail: { pos: number; age: number }[] = []
+/** 残りの箱があと 1 つになったことを、もう知らせたか */
+let lastOneNotified = false
+/** やり直さずに何面続けてクリアしたか */
+let streak = 0
+/** クリア時に手数を数え上げて見せるための、今表示している値 */
+let countedMoves = 0
 
 function must<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector)
@@ -68,6 +80,9 @@ function startLevel(index: number): void {
   clearTimer = 0
   fitCount = 0
   locked = false
+  trail = []
+  lastOneNotified = false
+  countedMoves = 0
   // 紙吹雪はここで消さない。次の面が始まってからも降り続ける方が続けて遊んでいる感じが出る
 
   progress = { ...progress, current: index }
@@ -101,12 +116,22 @@ function step(direction: Direction): void {
 
   // 押した箱は位置が変わるので、動く前の位置を引き継いで補間の起点にする
   const from = new Map<number, number>()
+  let pushedBox: number | null = null
   for (const box of game.boxes) {
-    from.set(box, before.has(box) ? box : findMovedFrom(box, before, direction))
+    if (before.has(box)) {
+      from.set(box, box)
+      continue
+    }
+    from.set(box, findMovedFrom(box, before, direction))
+    pushedBox = box
   }
-  motion = { progress: 0, from, playerFrom: playerBefore }
+  motion = { progress: 0, from, playerFrom: playerBefore, pushedBox }
 
-  if (wasPush(before)) sound.push()
+  trail.unshift({ pos: playerBefore, age: 0 })
+  if (trail.length > TRAIL_LIMIT) trail.length = TRAIL_LIMIT
+
+  if (pushedBox !== null) sound.push()
+  else sound.step()
 
   const fitAfter = fitBoxes()
   const fresh = [...fitAfter].filter((box) => !fitBefore.has(box))
@@ -118,11 +143,32 @@ function step(direction: Direction): void {
     sound.unfit()
   }
 
+  notifyLastOne()
   updateHud()
 
   if (game.cleared) {
     onCleared()
   }
+}
+
+/** 残りがあと 1 つになったら、一度だけ知らせる */
+function notifyLastOne(): void {
+  if (game.cleared) return
+  const remaining = game.level.boxStarts.length - fitBoxes().size
+  if (remaining === 1) {
+    if (!lastOneNotified) {
+      lastOneNotified = true
+      sound.lastOne()
+    }
+  } else {
+    lastOneNotified = false
+  }
+}
+
+/** 残りの箱があと 1 つか */
+function isLastOne(): boolean {
+  if (locked) return false
+  return game.level.boxStarts.length - fitBoxes().size === 1
 }
 
 /** 押されて動いた箱の、動く前の位置 */
@@ -139,13 +185,6 @@ function findMovedFrom(box: number, before: Map<number, number>, direction: Dire
   return before.has(back) ? back : box
 }
 
-function wasPush(before: Map<number, number>): boolean {
-  for (const box of game.boxes) {
-    if (!before.has(box)) return true
-  }
-  return false
-}
-
 /** 今、穴の上にある箱 */
 function fitBoxes(): Set<number> {
   const result = new Set<number>()
@@ -160,15 +199,25 @@ function onFit(fresh: number[]): void {
   justFit = new Set(fresh)
   justFitTimer = JUST_FIT_SECONDS
 
+  // 最後の 1 つが決まった瞬間だけ、けた違いに派手にする
+  const final = game.cleared
+  const strength = final ? 4 : 1
+
   const { cell, x, y } = renderer.boardOrigin(level.width, level.height)
   for (const box of fresh) {
     const at = toXY(level, box)
-    effects.burst(x + at.x * cell + cell / 2, y + at.y * cell + cell / 2, cell)
+    effects.burst(x + at.x * cell + cell / 2, y + at.y * cell + cell / 2, cell, strength)
   }
 
-  sound.fit(fitCount)
+  if (final) {
+    effects.whiteOut(1)
+    sound.finalFit()
+    vibrate(sound, [0, 60])
+  } else {
+    sound.fit(fitCount)
+    vibrate(sound, 18)
+  }
   fitCount += fresh.length
-  vibrate(sound, 18)
 }
 
 function onCleared(): void {
@@ -189,7 +238,9 @@ function onCleared(): void {
   progress = { cleared, current: Math.min(level.index + 1, levels.length) }
   saveProgress(progress)
 
-  levelText.textContent = `${game.moves} 手でクリア`
+  streak++
+  countedMoves = 0
+  levelText.textContent = '0 手でクリア'
 
   if (cleared.size === levels.length) {
     sound.allClear()
@@ -255,6 +306,10 @@ resetButton.addEventListener('click', () => {
   motion = null
   justFit = new Set()
   fitCount = 0
+  trail = []
+  lastOneNotified = false
+  // やり直したら連続クリアは途切れる。背景の熱も冷める
+  streak = 0
   effects.clear()
   updateHud()
 })
@@ -276,8 +331,9 @@ function openLevelSelect(): void {
     if (level.index === game.level.index) button.classList.add('current')
     button.addEventListener('click', () => {
       levelSelect.hidden = true
-      // 選び直したときは前の面の演出を引きずらない
+      // 選び直したときは前の面の演出も連続クリアも引きずらない
       effects.clear()
+      streak = 0
       startLevel(level.index)
     })
     levelGrid.append(button)
@@ -303,8 +359,16 @@ function frame(now: number): void {
     }
   }
 
+  for (const mark of trail) mark.age += dt / TRAIL_SECONDS
+  trail = trail.filter((mark) => mark.age < 1)
+
   if (clearTimer > 0) {
     clearTimer -= dt
+    // 手数を数え上げて見せる。演出の前半で数え切る
+    if (countedMoves < game.moves) {
+      countedMoves = Math.min(game.moves, countedMoves + Math.ceil(game.moves * dt * 2.5))
+      levelText.textContent = `${countedMoves} 手でクリア`
+    }
     if (clearTimer <= 0) {
       clearTimer = 0
       advance()
@@ -319,8 +383,12 @@ function frame(now: number): void {
       motion,
       justFit,
       clearProgress: locked ? Math.max(0, CLEAR_SECONDS - clearTimer) : 0,
+      lastOne: isLastOne(),
+      trail,
+      streak,
     },
     effects,
+    dt,
   )
 
   requestAnimationFrame(frame)
