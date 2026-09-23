@@ -35,6 +35,8 @@ const TRAIL_LIMIT = 8
 const FIT_SLOWDOWN = 7
 /** 吸い込まれ切った瞬間に、これだけ画面を止めてから爆発させる */
 const HIT_STOP_SECONDS = 0.18
+/** クリア演出の残り秒数がこの値を切ったときに、紙吹雪を追加で降らせる */
+const CONFETTI_WAVES = [1.15, 0.85, 0.5]
 
 const canvas = must<HTMLCanvasElement>('#board')
 const levelLabel = must<HTMLElement>('#level-label')
@@ -503,7 +505,17 @@ function frame(now: number): void {
   }
 
   if (clearTimer > 0) {
+    const before = clearTimer
     clearTimer -= dt
+
+    // 一度に全部撒くと最初の一瞬で終わるので、何度かに分けて降らせ続ける
+    for (const at of CONFETTI_WAVES) {
+      if (before > at && clearTimer <= at) {
+        const { cell } = renderer.boardOrigin(game.level.width, game.level.height)
+        effects.rain(canvas.clientWidth, canvas.clientHeight, cell, 70)
+      }
+    }
+
     // 手数を数え上げて見せる。演出の前半で数え切る
     if (countedMoves < game.moves) {
       countedMoves = Math.min(game.moves, countedMoves + Math.ceil(game.moves * dt * 2.5))
