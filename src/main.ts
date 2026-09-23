@@ -32,9 +32,9 @@ const TRAIL_SECONDS = 0.5
 /** 跡として残す最大の数 */
 const TRAIL_LIMIT = 8
 /** 箱が穴に入る一手だけ、移動をこの倍だけ長くかけて吸い込まれるように見せる */
-const FIT_SLOWDOWN = 3.5
+const FIT_SLOWDOWN = 7
 /** 吸い込まれ切った瞬間に、これだけ画面を止めてから爆発させる */
-const HIT_STOP_SECONDS = 0.09
+const HIT_STOP_SECONDS = 0.18
 
 const canvas = must<HTMLCanvasElement>('#board')
 const levelLabel = must<HTMLElement>('#level-label')
@@ -74,6 +74,8 @@ let pendingFit: number[] | null = null
 let hitStop = 0
 /** あと 1 手で入る箱と穴。予告に使う */
 let reaches: Reach[] = []
+/** 予告中に粒を出す間隔を測るための時計 */
+let reachSpawn = 0
 /** クリア時に手数を数え上げて見せるための、今表示している値 */
 let countedMoves = 0
 
@@ -257,12 +259,16 @@ function onFit(fresh: number[]): void {
   // 入れるたびに派手さを積み増す。1 つ目より 2 つ目、2 つ目より 3 つ目が強い。
   // 最後の 1 つが決まった瞬間だけ、けた違いにする
   const final = game.cleared
-  const strength = final ? 4.5 : 1.8 + fitCount * 0.6
+  const strength = final ? 6 : 2.6 + fitCount * 0.8
 
   const { cell, x, y } = renderer.boardOrigin(level.width, level.height)
   for (const box of fresh) {
     const at = toXY(level, box)
-    effects.burst(x + at.x * cell + cell / 2, y + at.y * cell + cell / 2, cell, strength)
+    const cx = x + at.x * cell + cell / 2
+    const cy = y + at.y * cell + cell / 2
+    effects.burst(cx, cy, cell, strength)
+    // 溜めたぶんを解き放つ衝撃波。画面の外まで走り抜ける
+    effects.shockwave(cx, cy, cell, strength)
   }
 
   if (final) {
@@ -270,10 +276,10 @@ function onFit(fresh: number[]): void {
     sound.finalFit()
     vibrate(sound, [0, 60])
   } else {
-    // 金色に軽く飛ばす。入れた数が増えるほど強くする
-    effects.whiteOut(Math.min(0.45, 0.2 + fitCount * 0.1), 'gold')
+    // 金色に飛ばす。入れた数が増えるほど強くする
+    effects.whiteOut(Math.min(0.75, 0.42 + fitCount * 0.12), 'gold')
     sound.fit(fitCount)
-    vibrate(sound, 22 + fitCount * 8)
+    vibrate(sound, [0, 35 + fitCount * 10])
   }
   fitCount += fresh.length
 }
@@ -434,6 +440,20 @@ function frame(now: number): void {
 
   if (motion) {
     motion.progress += dt / (STEP_SECONDS * (motion.slow ? FIT_SLOWDOWN : 1))
+
+    // 吸い込まれている間、入る先の穴へ粒を集める。溜まっていくのが目に見える
+    if (motion.slow && pendingFit) {
+      const board = renderer.boardOrigin(game.level.width, game.level.height)
+      for (const box of pendingFit) {
+        const at = toXY(game.level, box)
+        const cx = board.x + at.x * board.cell + board.cell / 2
+        const cy = board.y + at.y * board.cell + board.cell / 2
+        // 進むほど密に集める
+        const count = 1 + Math.floor(motion.progress * 3)
+        for (let i = 0; i < count; i++) effects.gather(cx, cy, board.cell)
+      }
+    }
+
     if (motion.progress >= 1) {
       const wasSlow = motion.slow
       motion = null
@@ -452,6 +472,23 @@ function frame(now: number): void {
 
   for (const mark of trail) mark.age += dt / TRAIL_SECONDS
   trail = trail.filter((mark) => mark.age < 1)
+
+  // 予告が出ている間は、入る先の穴へ粒をちらちら流し続ける
+  if (reaches.length > 0) {
+    reachSpawn += dt
+    if (reachSpawn > 0.07) {
+      reachSpawn = 0
+      const board = renderer.boardOrigin(game.level.width, game.level.height)
+      for (const reach of reaches) {
+        const at = toXY(game.level, reach.goal)
+        effects.gather(
+          board.x + at.x * board.cell + board.cell / 2,
+          board.y + at.y * board.cell + board.cell / 2,
+          board.cell,
+        )
+      }
+    }
+  }
 
   if (clearTimer > 0) {
     clearTimer -= dt
