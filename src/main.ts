@@ -209,7 +209,9 @@ function step(direction: Direction): void {
 function updateReaches(notify = true): void {
   // 数だけ見ると、別の箱の予告に入れ替わったときに気づけない
   const before = new Set(reaches.map((r) => `${r.box}>${r.goal}`))
-  reaches = locked || pendingFit ? [] : findReaches(game)
+  // 予告は面の最後の 1 つだけ。途中の箱でも出すと、ここぞという感じが薄れる
+  const quiet = locked || pendingFit !== null || !isLastOne()
+  reaches = quiet ? [] : findReaches(game)
   const appeared = reaches.some((r) => !before.has(`${r.box}>${r.goal}`))
   if (notify && appeared) sound.reach()
 }
