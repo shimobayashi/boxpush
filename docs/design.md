@@ -188,6 +188,8 @@ seed を固定しているので、誰が走らせても同じ面になる。
 ```
 src/
   core/      盤面・移動・手数・あと 1 手で入る判定。画面に触らない
+             level.ts 面データと記号／game.ts 遊んでいる間の状態
+             zone.ts  箱で区切られた床の島／reach.ts あと 1 手で入る箱
   solver/    solve.ts   最小押し回数と最小手数を返す
              analyze.ts 面の難しさを測る
   ui/        Canvas 描画・入力・演出
