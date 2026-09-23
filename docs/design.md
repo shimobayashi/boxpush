@@ -197,7 +197,8 @@ scripts/
   gen.mjs      候補の生成と選別
   measure.mjs  levels.txt の各面の難しさを並べる
 levels.txt
-test/
+test/  盤面の規則・面データ・入力の溜め方（vitest）
+e2e/   ブラウザで遊んで操作の受け付けを見る（playwright）
 docs/  design.md（全体）/ levels.md（面と難しさ）/ effects.md（演出）
 ```
 
