@@ -10,8 +10,8 @@
 **作業量と難しさは別物。** 一本道を 10 回押す面は、回り込みが要る 3 回押しの面より易しい。
 押した回数を難しさとして扱うと、後半ほど作業が増えるだけの面ができあがる。
 
-測り方は、人が実際に解いた時間との相関を調べた研究に合わせている。
-Jarušek & Pelánek "Difficulty Rating of Sokoban Puzzle"（2000 問・785 時間の実測）の順位相関はこうなっている。
+測り方は、人が実際に解いた時間との相関を調べた研究に合わせている（[1]）。
+2000 問・785 時間の実測に対する順位相関はこうなっている。
 
 | 見ているもの | 順位相関 |
 | --- | --- |
@@ -20,19 +20,17 @@ Jarušek & Pelánek "Difficulty Rating of Sokoban Puzzle"（2000 問・785 時�
 | 箱の持ち替え回数 | 0.74 |
 | 問題の分解 | **0.82** |
 
-（http://sokoban.dk/wp-content/uploads/2016/02/Difficulty-Rating-of-Sokoban-Puzzle.pdf）
-
 **状態空間の広さは、人の感じる難しさとほぼ無関係。** これが一番大事な発見だった。
 このゲームには戻る操作があるので、詰んでも取り返しがつくことも理由になる。
 
 今は `src/solver/analyze.ts` で次の 4 つを数え、点数にしている。
 
-| 数えるもの | 中身 |
-| --- | --- |
-| 押し回数 | 最小押し回数。作業量の目安 |
-| 押しの区切り | 同じ箱を同じ向きに押し続ける並びを 1 つと数えた数（box lines） |
-| 箱の持ち替え | 押す箱を変えた回数。行ったり来たりが要るほど多い |
-| 問題の分解 | 箱を 2 組に分けたとき、組を行き来する回数のいちばん少ない値 |
+| 数えるもの | 中身 | 出どころ |
+| --- | --- | --- |
+| 押し回数 | 最小押し回数。作業量の目安 | [1] |
+| 押しの区切り | 同じ箱を同じ向きに押し続ける並びを 1 つと数えた数（box lines） | [2] |
+| 箱の持ち替え | 押す箱を変えた回数。行ったり来たりが要るほど多い | [1] [2] |
+| 問題の分解 | 箱を 2 組に分けたとき、組を行き来する回数のいちばん少ない値 | [1] |
 
 ```
 点数 = 押し回数 + 区切り x 1.5 + 持ち替え x 3 + 分解 x 5 + 箱数 x 2
@@ -155,3 +153,31 @@ seed を固定しているので、誰が走らせても同じ面になる。
 
 `node scripts/measure.mjs` を走らせると、各面の点数と内訳が並ぶ。
 自分で作った面がどのあたりの難しさかを見るのに使う。
+
+## 8. 参考にした資料
+
+[1] Petr Jarušek, Radek Pelánek.
+*Difficulty Rating of Sokoban Puzzle*.
+STAIRS 2010.
+http://sokoban.dk/wp-content/uploads/2016/02/Difficulty-Rating-of-Sokoban-Puzzle.pdf
+
+2000 問・785 時間の実測から、どの測り方が人の感じる難しさと合うかを調べたもの。
+今の点数の作りはほぼこれに沿っている。状態空間の広さが無関係だと分かったのもこの資料。
+「計算モデル」（相関 0.76）はまだ取り入れていない。
+
+[2] Joshua Taylor, Ian Parberry.
+*Procedural Generation of Sokoban Levels*.
+GAMEON-NA 2011.
+https://ianparberry.com/pubs/GAMEON-NA_METH_03.pdf
+
+面を自動で作る方法と、その質をどう測るかを扱ったもの。
+「押しの区切り」（box lines）と「箱の持ち替え」（box changes）はここから借りた。
+箱の周りの混み具合を見る指標（congestion）も出てくるが、こちらは使っていない。
+
+[3] Yunqi Zhao ほか.
+*Data-Driven Sokoban Puzzle Generation with Monte Carlo Tree Search*.
+AIIDE 2016.
+https://motion.cs.umn.edu/pub/SokobanMCTS/DataDrivenSokobanMCTS.pdf
+
+[2] と同じ指標群を、木探索で面を作る方法と組み合わせたもの。
+指標の裏取りに使った。作り方そのものは取り入れていない（今は逆引きで作っている）。
