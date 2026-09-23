@@ -60,6 +60,26 @@ body {
   color: var(--hud-dim);
 }
 
+#remaining-label {
+  color: var(--gold);
+  font-weight: 600;
+}
+
+/* 残り 1 つのあいだは点滅させて、あと一手であることを目立たせる */
+#remaining-label.last-one {
+  animation: remaining-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes remaining-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
 #hud button {
   width: 40px;
   height: 40px;

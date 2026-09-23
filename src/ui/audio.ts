@@ -52,9 +52,21 @@ export class Sound {
     this.tone({ semitone: -17, duration: 0.07, type: 'square', volume: 0.05 })
   }
 
-  /** 箱を押した */
+  /** ただ歩いた。ほとんど聞こえないくらいの足音 */
+  step(): void {
+    this.tone({ semitone: -22, duration: 0.035, type: 'sine', volume: 0.035 })
+  }
+
+  /** 箱を押した。低い方と高い方を重ねて、ずしりとした感じを出す */
   push(): void {
-    this.tone({ semitone: -5, duration: 0.06, type: 'triangle', volume: 0.07 })
+    this.tone({ semitone: -17, duration: 0.09, type: 'square', volume: 0.05 })
+    this.tone({ semitone: -5, duration: 0.06, type: 'triangle', volume: 0.06 })
+  }
+
+  /** 残りの箱があと 1 つになった。気づかせるための合図 */
+  lastOne(): void {
+    this.tone({ semitone: -12, duration: 0.5, type: 'sine', volume: 0.07 })
+    this.tone({ semitone: -5, duration: 0.5, type: 'sine', volume: 0.05, delay: 0.06 })
   }
 
   /**
@@ -67,6 +79,17 @@ export class Sound {
     this.tone({ semitone: semitone + 12, duration: 0.14, type: 'sine', volume: 0.08, delay: 0.02 })
   }
 
+  /**
+   * 最後の 1 つが穴に入った。
+   * 音階を上げるのをやめて、和音を一度に鳴らして解き放つ。
+   */
+  finalFit(): void {
+    for (const semitone of [0, 4, 7, 12, 19]) {
+      this.tone({ semitone, duration: 0.6, type: 'triangle', volume: 0.13 })
+    }
+    this.tone({ semitone: -24, duration: 0.7, type: 'sine', volume: 0.14 })
+  }
+
   /** 箱が穴から出た。入ったときの逆で下げる */
   unfit(): void {
     this.tone({ semitone: -12, duration: 0.12, type: 'triangle', volume: 0.08 })
@@ -74,9 +97,15 @@ export class Sound {
 
   clear(): void {
     FANFARE.forEach((semitone, i) => {
-      this.tone({ semitone, duration: 0.3, type: 'triangle', volume: 0.16, delay: i * 0.09 })
-      this.tone({ semitone: semitone + 12, duration: 0.3, type: 'sine', volume: 0.07, delay: i * 0.09 })
+      this.tone({ semitone, duration: 0.45, type: 'triangle', volume: 0.15, delay: i * 0.08 })
+      this.tone({ semitone: semitone + 7, duration: 0.45, type: 'triangle', volume: 0.09, delay: i * 0.08 })
+      this.tone({ semitone: semitone + 12, duration: 0.45, type: 'sine', volume: 0.07, delay: i * 0.08 })
     })
+    // 最後に和音を伸ばして余韻を残す
+    for (const semitone of [12, 16, 19, 24]) {
+      this.tone({ semitone, duration: 1.1, type: 'triangle', volume: 0.1, delay: 0.34 })
+    }
+    this.tone({ semitone: -12, duration: 1.2, type: 'sine', volume: 0.12, delay: 0.34 })
   }
 
   allClear(): void {
