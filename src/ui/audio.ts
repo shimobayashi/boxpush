@@ -69,11 +69,23 @@ export class Sound {
     this.tone({ semitone: 14, duration: 0.14, type: 'sine', volume: 0.06, delay: 0.07 })
   }
 
-  /** 箱が穴へ吸い込まれている間の音。上がりながら爆発を待たせる */
+  /**
+   * 箱が穴へ吸い込まれている間の音。
+   * 半音ずつ駆け上がって、爆発の直前で一番高くなる。
+   */
   suck(): void {
-    this.tone({ semitone: -12, duration: 0.3, type: 'sine', volume: 0.06 })
-    this.tone({ semitone: -5, duration: 0.26, type: 'sine', volume: 0.05, delay: 0.06 })
-    this.tone({ semitone: 2, duration: 0.2, type: 'sine', volume: 0.05, delay: 0.13 })
+    const steps = 9
+    for (let i = 0; i < steps; i++) {
+      this.tone({
+        semitone: -14 + i * 2,
+        duration: 0.12,
+        type: 'sine',
+        volume: 0.04 + i * 0.008,
+        delay: i * 0.055,
+      })
+    }
+    // 下から押し上げる低音を重ねて、来るぞという感じを出す
+    this.tone({ semitone: -26, duration: 0.55, type: 'triangle', volume: 0.07 })
   }
 
   /** 残りの箱があと 1 つになった。気づかせるための合図 */
