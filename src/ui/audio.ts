@@ -63,6 +63,19 @@ export class Sound {
     this.tone({ semitone: -5, duration: 0.06, type: 'triangle', volume: 0.06 })
   }
 
+  /** あと 1 手で入る箱ができた。気持ちを引っぱるための合図 */
+  reach(): void {
+    this.tone({ semitone: 7, duration: 0.1, type: 'sine', volume: 0.07 })
+    this.tone({ semitone: 14, duration: 0.14, type: 'sine', volume: 0.06, delay: 0.07 })
+  }
+
+  /** 箱が穴へ吸い込まれている間の音。上がりながら爆発を待たせる */
+  suck(): void {
+    this.tone({ semitone: -12, duration: 0.3, type: 'sine', volume: 0.06 })
+    this.tone({ semitone: -5, duration: 0.26, type: 'sine', volume: 0.05, delay: 0.06 })
+    this.tone({ semitone: 2, duration: 0.2, type: 'sine', volume: 0.05, delay: 0.13 })
+  }
+
   /** 残りの箱があと 1 つになった。気づかせるための合図 */
   lastOne(): void {
     this.tone({ semitone: -12, duration: 0.5, type: 'sine', volume: 0.07 })
