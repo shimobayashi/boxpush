@@ -112,6 +112,7 @@ export class Renderer {
     this.drawTrail(state, cell)
     this.drawBoxes(state, cell)
     this.drawPlayer(state, cell)
+    this.drawGoalUnderPlayer(state, cell)
 
     ctx.restore()
 
@@ -359,6 +360,26 @@ export class Renderer {
     ctx.beginPath()
     ctx.arc(cx, cy, cell * 0.27, 0, Math.PI * 2)
     ctx.fill()
+    ctx.restore()
+  }
+
+  /**
+   * 人が立っている穴の輪を、人の上から描き直す。
+   * 人の方が穴より大きいので、そのままだと穴が 1 つ消えたように見える。
+   */
+  private drawGoalUnderPlayer(state: RenderState, cell: number): void {
+    const level = state.game.level
+    const pos = state.game.player
+    if (!isGoal(level, pos)) return
+
+    const { x, y } = toXY(level, pos)
+    const ctx = this.ctx
+    ctx.save()
+    ctx.strokeStyle = 'rgba(255, 209, 102, 0.9)'
+    ctx.lineWidth = Math.max(2, cell * 0.05)
+    ctx.beginPath()
+    ctx.arc(x * cell + cell / 2, y * cell + cell / 2, cell * 0.33, 0, Math.PI * 2)
+    ctx.stroke()
     ctx.restore()
   }
 
