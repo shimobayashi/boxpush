@@ -330,6 +330,20 @@ export class Effects {
     }
   }
 
+  /**
+   * 残っている粒の寿命を、長くてもこの秒数までに詰める。
+   * 次の面に移ったときに呼ぶ。少しだけ残って見えるのは良いが、
+   * 降り続けると盤面が読み取りにくくなるため。
+   */
+  cutShort(seconds: number): void {
+    for (const p of this.particles) {
+      if (p.life <= seconds) continue
+      p.life = seconds
+      // 薄さは life / born で決まる。born を詰めないと、切った瞬間に急に薄くなる
+      p.born = seconds
+    }
+  }
+
   /** 画面全体を覆う。盤面を描いたあとに重ねて呼ぶ */
   drawFlash(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     if (this.flash <= 0) return

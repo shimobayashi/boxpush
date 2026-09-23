@@ -37,6 +37,8 @@ const FIT_SLOWDOWN = 7
 const HIT_STOP_SECONDS = 0.18
 /** クリア演出の残り秒数がこの値を切ったときに、紙吹雪を追加で降らせる */
 const CONFETTI_WAVES = [1.15, 0.85, 0.5]
+/** 次の面に移ったあと、残った紙吹雪が消えるまでの秒数 */
+const CONFETTI_TAIL_SECONDS = 0.45
 
 const canvas = must<HTMLCanvasElement>('#board')
 const levelLabel = must<HTMLElement>('#level-label')
@@ -103,7 +105,9 @@ function startLevel(index: number): void {
   pendingFit = null
   hitStop = 0
   reaches = []
-  // 紙吹雪はここで消さない。次の面が始まってからも降り続ける方が続けて遊んでいる感じが出る
+  // 紙吹雪はここで消さない。次の面に少し残っている方が続けて遊んでいる感じが出る。
+  // ただし降り続けると盤面が読み取りにくいので、短く畳む
+  effects.cutShort(CONFETTI_TAIL_SECONDS)
 
   progress = { ...progress, current: index }
   saveProgress(progress)
