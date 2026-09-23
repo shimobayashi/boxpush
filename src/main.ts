@@ -125,13 +125,22 @@ function startLevel(index: number): void {
 
 function updateHud(): void {
   moveLabel.textContent = `${game.moves} 手`
-  undoButton.disabled = game.moves === 0 || locked
-  resetButton.disabled = game.moves === 0 || locked
+  undoButton.disabled = game.moves === 0 || isBusy()
+  resetButton.disabled = game.moves === 0 || isBusy()
   updateRemaining()
 }
 
+/**
+ * 今は操作を受け付けない。
+ * クリア演出の間に加えて、最後の箱を溜めてから爆発させるまでの間も入る。
+ * ここを開けておくと、キーを押しっぱなしにしたときに入ったばかりの箱を穴の先へ押し出せてしまう。
+ */
+function isBusy(): boolean {
+  return locked || pendingFit !== null || hitStop > 0
+}
+
 function step(direction: Direction): void {
-  if (locked) return
+  if (isBusy()) return
 
   const before = new Map<number, number>()
   for (const box of game.boxes) before.set(box, box)
@@ -143,6 +152,8 @@ function step(direction: Direction): void {
     const { cell } = renderer.boardOrigin(game.level.width, game.level.height)
     effects.bump(cell * 0.1)
     sound.blocked()
+    // 壁に当たったまま押し続けても進まない。溜まったぶんを捨てて、当たる音が鳴り続けないようにする
+    input.discard()
     return
   }
 
@@ -191,6 +202,8 @@ function step(direction: Direction): void {
   const fitAfter = fitBoxes()
   const fresh = [...fitAfter].filter((box) => !fitBefore.has(box))
   if (fresh.length > 0) {
+    // 入ったところで入力を切る。切らないと、そのまま穴の先まで押して詰ませてしまう
+    input.release()
     if (game.cleared) {
       // 最後の 1 つだけ溜める。途中の箱まで毎回止めると、続けて解く流れが切れる
       motion.slow = true
@@ -370,13 +383,26 @@ function skipClearDelay(): void {
 }
 
 const input = new Input(canvas, {
-  onStep: (direction) => {
-    // クリア演出の間は動かさない。飛ばしたいときは指を離して触り直す
-    if (locked) return
-    step(direction)
-  },
   onTouch: () => sound.wake(),
 })
+
+/**
+ * 溜まった歩を 1 歩ずつ流し込む。
+ *
+ * 1 歩を描き切るまで次は取らない。まとめて動かすと、
+ * 箱が穴に入ったことに気づく前に穴の先まで押してしまう。
+ * 1 歩ごとに結果を見るので、入ったところで残りを捨てて止められる。
+ */
+function pump(): void {
+  if (isBusy()) {
+    // 演出の間に溜まったぶんは捨てる。終わったとたんに歩き出さないため
+    input.release()
+    return
+  }
+  if (motion) return
+  const direction = input.take()
+  if (direction) step(direction)
+}
 
 canvas.addEventListener('pointerdown', skipClearDelay)
 
@@ -387,7 +413,7 @@ soundButton.addEventListener('click', () => {
 })
 
 undoButton.addEventListener('click', () => {
-  if (locked) return
+  if (isBusy()) return
   if (!game.undo()) return
   motion = null
   justFit = new Set()
@@ -397,7 +423,7 @@ undoButton.addEventListener('click', () => {
 })
 
 resetButton.addEventListener('click', () => {
-  if (locked) return
+  if (isBusy()) return
   game.reset()
   motion = null
   justFit = new Set()
@@ -485,6 +511,8 @@ function frame(now: number): void {
       if (wasSlow && pendingFit) hitStop = HIT_STOP_SECONDS
     }
   }
+
+  pump()
 
   if (justFitTimer > 0) {
     justFitTimer -= dt
